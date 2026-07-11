@@ -1,10 +1,4 @@
--- mikeyware_cmds.lua
--- Mikeyware command plugin — prefix: ' (tick)
--- Port of Infinite Yield commands. Load standalone or via addPlugin.
-
 if not game:IsLoaded() then game.Loaded:Wait() end
-
--- ── services ──────────────────────────────────────────────────────────────────
 local Players        = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService     = game:GetService("RunService")
@@ -21,23 +15,18 @@ local PathfindingService = game:GetService("PathfindingService")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 local CoreGui        = game:GetService("CoreGui")
 local TextChatService = game:GetService("TextChatService")
-
 local lp   = Players.LocalPlayer
 local cam  = workspace.CurrentCamera
-
--- ── globals ───────────────────────────────────────────────────────────────────
 local PREFIX       = "'"
 local cmds         = {}
 local aliases      = {}
 local customAlias  = {}
 local cmdHistory   = {}
 local lastCmds     = {}
-local loops        = {}       -- active loop threads
+local loops        = {}
 local lastBreakTime = 0
 local tweenSpeed   = 1
 local cargs        = {}
-
--- ── helpers ───────────────────────────────────────────────────────────────────
 local function isNum(v)  return tonumber(v) ~= nil end
 local function lower(s)  return tostring(s):lower() end
 local function split(s, d)
@@ -66,12 +55,9 @@ local function r15(speaker)
 	return char and char:FindFirstChild("UpperTorso") ~= nil
 end
 local function notify(title, text, duration)
-	-- try to use mikeylib notify if available, else fallback
 	pcall(function()
 		local gui = CoreGui:FindFirstChild("MW_NOTIF_GUI") or lp.PlayerGui:FindFirstChild("MW_NOTIF_GUI")
-		-- mikeylib notify is global via the lib instance; we fire it via a bindable if available
 	end)
-	-- simple fallback StarterGui notification
 	pcall(function()
 		StarterGui:SetCore("SendNotification", {
 			Title    = tostring(title),
@@ -101,8 +87,6 @@ local function breakVelocity()
 		if v:IsA("BasePart") then v.Velocity = v3; v.RotVelocity = v3 end
 	end
 end
-
--- ── getPlayer engine (IY-style) ───────────────────────────────────────────────
 local function getPlayersByName(name)
 	local found, len = {}, #name
 	for _, v in pairs(Players:GetPlayers()) do
@@ -118,7 +102,6 @@ local function getPlayersByName(name)
 	end
 	return found
 end
-
 local SpecialPlayerCases = {
 	["all"]       = function(sp) return Players:GetPlayers() end,
 	["others"]    = function(sp)
@@ -211,7 +194,6 @@ local SpecialPlayerCases = {
 		return r
 	end,
 }
--- regex patterns
 local RegexCases = {
 	{ pat = "^#(%d+)$", fn = function(sp, m, list)
 		local n, r, pool = tonumber(m[1]), {}, {table.unpack(list)}
@@ -255,7 +237,6 @@ local RegexCases = {
 		return r
 	end },
 }
-
 local function onlyIn(tab, matches)
 	local set, r = {}, {}
 	for _, v in pairs(matches) do set[v.Name] = true end
@@ -277,7 +258,6 @@ local function resolveToken(name, sp, initial)
 	end
 	return onlyIn(initial, getPlayersByName(name))
 end
-
 local function getPlayer(list, speaker)
 	speaker = speaker or lp
 	if not list then return {speaker} end
@@ -306,8 +286,6 @@ local function getPlayer(list, speaker)
 	end
 	return found
 end
-
--- ── command registry ──────────────────────────────────────────────────────────
 local function addcmd(name, als, fn)
 	cmds[#cmds+1] = { name = lower(name), aliases = als or {}, fn = fn }
 end
@@ -319,8 +297,6 @@ local function findCmd(name)
 	end
 	return customAlias[name]
 end
-
--- ── execCmd ───────────────────────────────────────────────────────────────────
 local function execCmd(str, speaker, store)
 	speaker = speaker or lp
 	str = str:gsub("%s+$", "")
@@ -329,7 +305,6 @@ local function execCmd(str, speaker, store)
 		local chunks = split(str, "\\")
 		for _, chunk in ipairs(chunks) do
 			chunk = chunk:gsub("%%BSLASH%%", "\\")
-			-- loop syntax: 5^1^cmd or inf^0.5^cmd
 			local times, delay_, body = nil, 0, chunk
 			local n, rest = chunk:match("^(%d+)%^(.+)$")
 			if n then
@@ -344,7 +319,6 @@ local function execCmd(str, speaker, store)
 					if d then delay_ = tonumber(d) or 0; body = b else body = rest2 end
 				end
 			end
-			-- !cmd repeats last args
 			if body:sub(1,1) == "!" then
 				local cn = split(body:sub(2))[1]
 				if cn and lastCmds[cn] then body = lastCmds[cn] end
@@ -379,28 +353,20 @@ local function execCmd(str, speaker, store)
 		end
 	end)
 end
-
--- ── input listener ────────────────────────────────────────────────────────────
--- Wire into the HUD command bar if it exists, otherwise create a minimal one
 task.spawn(function()
-	task.wait(1) -- let HUD initialize
-	-- look for the Mikeyware HUD cmdbar textbox
+	task.wait(1)
 	local cmdBox = nil
 	local hudGui = CoreGui:FindFirstChild("MW_HUD_GUI")
 		or (lp.PlayerGui and lp.PlayerGui:FindFirstChild("MW_HUD_GUI"))
 	if hudGui then
 		cmdBox = hudGui:FindFirstChild("MW_CmdBox", true)
 	end
-	-- if no cmdbox in HUD, just listen via chat prefix
 	UserInputService.InputBegan:Connect(function(inp, gp)
 		if gp then return end
 		if inp.KeyCode == Enum.KeyCode.Return or inp.KeyCode == Enum.KeyCode.KeypadEnter then
-			-- handled by textbox FocusLost
 		end
 	end)
 end)
-
--- also intercept chat prefix
 TextChatService.MessageReceived:Connect(function(msg)
 	if msg.TextSource and msg.TextSource.UserId == lp.UserId then
 		local txt = msg.Text or ""
@@ -409,7 +375,6 @@ TextChatService.MessageReceived:Connect(function(msg)
 		end
 	end
 end)
--- legacy chat
 pcall(function()
 	lp.Chatted:Connect(function(msg)
 		if msg:sub(1, #PREFIX) == PREFIX then
@@ -417,8 +382,6 @@ pcall(function()
 		end
 	end)
 end)
-
--- ── expose for external use ───────────────────────────────────────────────────
 local function getCmdNames()
 	local names = {}
 	for _, c in pairs(cmds) do
@@ -428,21 +391,14 @@ local function getCmdNames()
 	table.sort(names)
 	return names
 end
-
 _G.MWCmds = {
 	addcmd    = addcmd,
 	execCmd   = execCmd,
 	getPlayer = getPlayer,
 	notify    = notify,
 	setPrefix = function(p) PREFIX = p end,
-	_cmdNames = getCmdNames(), -- populated after all addcmd calls below
+	_cmdNames = getCmdNames(),
 }
-
-
--- ══════════════════════════════════════════════════════════════════════════════
--- MOVEMENT
--- ══════════════════════════════════════════════════════════════════════════════
-
 local FLYING = false
 local flySpeed = 1
 local vflySpeed = 1
@@ -450,7 +406,6 @@ local Clip = true
 local QEfly = true
 local noclipConn = nil
 local flyKeyDown, flyKeyUp
-
 local function sFLY(vfly)
 	FLYING = true
 	local char = lp.Character
@@ -483,7 +438,6 @@ local function sFLY(vfly)
 			+ Vector3.new(0, (CTRL.E-CTRL.Q)*spd, 0)
 	end)
 end
-
 local function NOFLY()
 	FLYING = false
 	if flyKeyDown then flyKeyDown:Disconnect() end
@@ -492,7 +446,6 @@ local function NOFLY()
 	if hum then hum.PlatformStand = false end
 	pcall(function() cam.CameraType = Enum.CameraType.Custom end)
 end
-
 addcmd("fly",{},function(args,sp)
 	NOFLY(); task.wait()
 	if args[1] and isNum(args[1]) then flySpeed = tonumber(args[1]) end
@@ -511,8 +464,6 @@ addcmd("vflyspeed",{"vehicleflyspeed"},function(args) if isNum(args[1]) then vfl
 addcmd("qefly",{},function(args)
 	QEfly = (args[1] ~= "false")
 end)
-
--- cframefly
 local CFspeed = 50
 local CFloop = nil
 addcmd("cfly",{"cframefly"},function(args,sp)
@@ -540,8 +491,6 @@ addcmd("uncfly",{"uncframefly"},function(args,sp)
 	notify("CFrame Fly","Disabled")
 end)
 addcmd("cflyspeed",{"cframeflyspeed"},function(args) if isNum(args[1]) then CFspeed=tonumber(args[1]) end end)
-
--- noclip
 addcmd("noclip",{},function(args,sp)
 	Clip = false
 	noclipConn = RunService.Stepped:Connect(function()
@@ -558,8 +507,6 @@ addcmd("clip",{"unnoclip"},function()
 	Clip = true; notify("Noclip","Disabled")
 end)
 addcmd("togglenoclip",{},function() if Clip then execCmd("noclip") else execCmd("clip") end end)
-
--- speed / walkspeed
 addcmd("speed",{"ws","walkspeed"},function(args,sp)
 	local s = tonumber(args[1]) or 16
 	local hum = sp.Character and sp.Character:FindFirstChildOfClass("Humanoid")
@@ -572,12 +519,9 @@ addcmd("loopspeed",{"loopws"},function(args,sp)
 	hum.WalkSpeed = s
 end)
 addcmd("unloopspeed",{"unloopws"},function(args,sp)
-	-- disconnect is handled by breakloops; just reset speed
 	local hum = sp.Character and sp.Character:FindFirstChildOfClass("Humanoid")
 	if hum then hum.WalkSpeed = 16 end
 end)
-
--- jump
 addcmd("jumppower",{"jp","jpower"},function(args,sp)
 	local j = tonumber(args[1]) or 50
 	local hum = sp.Character and sp.Character:FindFirstChildOfClass("Humanoid")
@@ -608,25 +552,17 @@ addcmd("autojump",{"ajump"},function(args,sp)
 		if hit then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
 	end)
 end)
-
--- gravity
 addcmd("gravity",{"grav"},function(args)
 	workspace.Gravity = tonumber(args[1]) or 196.2
 end)
-
--- hipheight
 addcmd("hipheight",{"hheight"},function(args,sp)
 	local hum = sp.Character and sp.Character:FindFirstChildOfClass("Humanoid")
 	if hum then hum.HipHeight = tonumber(args[1]) or 0 end
 end)
-
--- maxslopeangle
 addcmd("maxslopeangle",{"msa"},function(args,sp)
 	local hum = sp.Character and sp.Character:FindFirstChildOfClass("Humanoid")
 	if hum then hum.MaxSlopeAngle = tonumber(args[1]) or 89 end
 end)
-
--- float / platform
 local Floating = false
 local floatName = "MW_Float_" .. tostring(math.random(1000,9999))
 addcmd("float",{"platform"},function(args,sp)
@@ -649,8 +585,6 @@ addcmd("unfloat",{"nofloat","noplatform","unplatform"},function(args,sp)
 	if char and char:FindFirstChild(floatName) then char:FindFirstChild(floatName):Destroy() end
 	notify("Float","Disabled")
 end)
-
--- swim
 local swimming = false
 local oldGrav = workspace.Gravity
 addcmd("swim",{},function(args,sp)
@@ -671,8 +605,6 @@ addcmd("unswim",{"noswim"},function()
 	notify("Swim","Disabled")
 end)
 addcmd("toggleswim",{},function() if swimming then execCmd("unswim") else execCmd("swim") end end)
-
--- sit / lay / sitwalk / nosit
 addcmd("sit",{},function(args,sp)
 	local hum = sp.Character and sp.Character:FindFirstChildOfClass("Humanoid")
 	if hum then hum.Sit = true end
@@ -689,8 +621,6 @@ addcmd("unnosit",{},function(args,sp)
 	local hum = sp.Character and sp.Character:FindFirstChildOfClass("Humanoid")
 	if hum then hum:SetStateEnabled(Enum.HumanoidStateType.Seated, true) end
 end)
-
--- spin
 addcmd("spin",{},function(args,sp)
 	local root = getRoot(sp.Character); if not root then return end
 	for _, v in pairs(root:GetChildren()) do if v.Name=="MW_Spin" then v:Destroy() end end
@@ -703,16 +633,12 @@ addcmd("unspin",{},function(args,sp)
 	local root = getRoot(sp.Character); if not root then return end
 	for _, v in pairs(root:GetChildren()) do if v.Name=="MW_Spin" then v:Destroy() end end
 end)
-
--- anchor
 addcmd("anchor",{},function(args,sp)
 	local root = getRoot(sp.Character); if root then root.Anchored=true end
 end)
 addcmd("unanchor",{},function(args,sp)
 	local root = getRoot(sp.Character); if root then root.Anchored=false end
 end)
-
--- tpwalk
 local tpwalkConn = nil
 addcmd("tpwalk",{"teleportwalk"},function(args,sp)
 	if tpwalkConn then tpwalkConn:Disconnect() end
@@ -727,8 +653,6 @@ end)
 addcmd("untpwalk",{"unteleportwalk"},function()
 	if tpwalkConn then tpwalkConn:Disconnect(); tpwalkConn=nil end
 end)
-
--- platformstand / stun
 addcmd("stun",{"platformstand"},function(args,sp)
 	local hum = sp.Character and sp.Character:FindFirstChildOfClass("Humanoid")
 	if hum then hum.PlatformStand=true end
@@ -737,8 +661,6 @@ addcmd("unstun",{"nostun","unplatformstand"},function(args,sp)
 	local hum = sp.Character and sp.Character:FindFirstChildOfClass("Humanoid")
 	if hum then hum.PlatformStand=false end
 end)
-
--- norotate
 addcmd("norotate",{"noautorotate"},function(args,sp)
 	local hum = sp.Character and sp.Character:FindFirstChildOfClass("Humanoid")
 	if hum then hum.AutoRotate=false end
@@ -747,17 +669,11 @@ addcmd("unnorotate",{"autorotate"},function(args,sp)
 	local hum = sp.Character and sp.Character:FindFirstChildOfClass("Humanoid")
 	if hum then hum.AutoRotate=true end
 end)
-
--- breakvelocity
 addcmd("breakvelocity",{},function(args,sp) breakVelocity() end)
 addcmd("breakloops",{"break"},function() lastBreakTime=tick(); notify("Loops","All loops stopped") end)
-
--- wallwalk
 addcmd("wallwalk",{"walkonwalls"},function()
 	loadstring(game:HttpGet("https://raw.githubusercontent.com/infyiff/backup/main/wallwalker.lua"))()
 end)
-
--- trip
 addcmd("trip",{},function(args,sp)
 	local hum = sp.Character and sp.Character:FindFirstChildOfClass("Humanoid")
 	local root = getRoot(sp.Character)
@@ -766,8 +682,6 @@ addcmd("trip",{},function(args,sp)
 		root.Velocity = root.CFrame.LookVector * 30
 	end
 end)
-
--- antivoid
 local antivoidConn = nil
 addcmd("antivoid",{},function(args,sp)
 	if antivoidConn then antivoidConn:Disconnect() end
@@ -784,8 +698,6 @@ addcmd("unantivoid",{"noantivoid"},function()
 	if antivoidConn then antivoidConn:Disconnect(); antivoidConn=nil end
 	notify("Antivoid","Disabled")
 end)
-
--- fakeout
 addcmd("fakeout",{},function(args,sp)
 	local root = getRoot(sp.Character); if not root then return end
 	local old = root.CFrame
@@ -796,17 +708,9 @@ addcmd("fakeout",{},function(args,sp)
 	root.CFrame = old
 	workspace.FallenPartsDestroyHeight = dh
 end)
-
-
--- ══════════════════════════════════════════════════════════════════════════════
--- TELEPORT & WAYPOINTS
--- ══════════════════════════════════════════════════════════════════════════════
-
 local tweenSpd = 1
 local WayPoints = {}
-
 addcmd("tweenspeed",{"tspeed"},function(args) tweenSpd=tonumber(args[1]) or 1 end)
-
 addcmd("goto",{"to"},function(args,sp)
 	for _, v in pairs(getPlayer(args[1],sp)) do
 		if v.Character then
@@ -873,7 +777,6 @@ addcmd("loopgoto",{},function(args,sp)
 	end
 end)
 addcmd("unloopgoto",{"noloopgoto"},function() loopGotoTarget=nil end)
-
 local loopBring = {}
 addcmd("loopbring",{},function(args,sp)
 	for _, v in pairs(getPlayer(args[1],sp)) do
@@ -893,7 +796,6 @@ end)
 addcmd("unloopbring",{"noloopbring"},function(args,sp)
 	for _, v in pairs(getPlayer(args[1],sp)) do loopBring[v.Name]=false end
 end)
-
 addcmd("pulsetp",{"ptp"},function(args,sp)
 	for _, v in pairs(getPlayer(args[1],sp)) do
 		if v.Character then
@@ -904,7 +806,6 @@ addcmd("pulsetp",{"ptp"},function(args,sp)
 		end
 	end
 end)
-
 addcmd("mouseteleport",{"mousetp"},function(args,sp)
 	local mouse = lp:GetMouse()
 	local root = getRoot(sp.Character)
@@ -912,7 +813,6 @@ addcmd("mouseteleport",{"mousetp"},function(args,sp)
 		root.CFrame = CFrame.new(mouse.Hit.X, mouse.Hit.Y+3, mouse.Hit.Z, select(4,root.CFrame:components()))
 	end
 end)
-
 addcmd("tptool",{"teleporttool"},function(args,sp)
 	local tool = Instance.new("Tool"); tool.Name="Teleport Tool"
 	tool.RequiresHandle=false; tool.Parent=sp:FindFirstChildOfClass("Backpack")
@@ -921,8 +821,6 @@ addcmd("tptool",{"teleporttool"},function(args,sp)
 		if root and mouse.Hit then root.CFrame = CFrame.new(mouse.Hit.X,mouse.Hit.Y+3,mouse.Hit.Z) end
 	end)
 end)
-
--- waypoints
 addcmd("setwaypoint",{"swp","swp","savepos"},function(args,sp)
 	local name = getstring(1,args)
 	local root = getRoot(sp.Character); if not root then return end
@@ -962,8 +860,6 @@ addcmd("waypoints",{"wps"},function()
 	for _, w in pairs(WayPoints) do names[#names+1] = w.name end
 	notify("Waypoints", #names > 0 and table.concat(names,", ") or "None")
 end)
-
--- walkto / follow
 local walktoActive = false
 addcmd("walkto",{"follow"},function(args,sp)
 	walktoActive = true
@@ -978,8 +874,6 @@ addcmd("walkto",{"follow"},function(args,sp)
 	end
 end)
 addcmd("unwalkto",{"unfollow","nowalkto"},function() walktoActive=false end)
-
--- orbit
 local orbitConn1, orbitConn2 = nil, nil
 addcmd("orbit",{},function(args,sp)
 	if orbitConn1 then orbitConn1:Disconnect() end
@@ -1007,8 +901,6 @@ addcmd("unorbit",{},function()
 	if orbitConn2 then orbitConn2:Disconnect() end
 	notify("Orbit","Stopped")
 end)
-
--- headsit
 local headsitConn = nil
 addcmd("headsit",{},function(args,sp)
 	if headsitConn then headsitConn:Disconnect() end
@@ -1021,8 +913,6 @@ addcmd("headsit",{},function(args,sp)
 		end)
 	end
 end)
-
--- scare
 addcmd("scare",{"spook"},function(args,sp)
 	for _, v in pairs(getPlayer(args[1],sp)) do
 		local old = getRoot(sp.Character).CFrame
@@ -1034,8 +924,6 @@ addcmd("scare",{"spook"},function(args,sp)
 		end
 	end
 end)
-
--- freeze / thaw
 addcmd("freeze",{"fr"},function(args,sp)
 	for _, v in pairs(getPlayer(args[1],sp)) do
 		if v.Character then
@@ -1054,13 +942,10 @@ addcmd("thaw",{"unfr","unfreeze"},function(args,sp)
 		end
 	end
 end)
-
--- flashback
 local lastDeath = nil
 addcmd("flashback",{"diedtp"},function(args,sp)
 	if lastDeath then getRoot(sp.Character).CFrame = lastDeath end
 end)
--- track death position
 task.spawn(function()
 	local function hookDeath(char)
 		local hum = char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid", 5)
@@ -1074,8 +959,6 @@ task.spawn(function()
 	if lp.Character then hookDeath(lp.Character) end
 	lp.CharacterAdded:Connect(hookDeath)
 end)
-
--- walltp
 local walltpConn = nil
 addcmd("walltp",{},function(args,sp)
 	local torso = sp.Character and (sp.Character:FindFirstChild("UpperTorso") or sp.Character:FindFirstChild("Torso"))
@@ -1092,15 +975,12 @@ addcmd("nowalltp",{"unwalltp"},function()
 	if walltpConn then walltpConn:Disconnect(); walltpConn=nil end
 	notify("Walltp","Disabled")
 end)
-
--- respawn / refresh / reset / god
 local function doRespawn(sp)
 	local char = sp.Character
 	local newChar = Instance.new("Model"); newChar.Parent=workspace
 	sp.Character = newChar; task.wait()
 	sp.Character = char; newChar:Destroy()
 end
-
 addcmd("respawn",{},function(args,sp) doRespawn(sp) end)
 addcmd("reset",{},function(args,sp)
 	local hum = sp.Character and sp.Character:FindFirstChildOfClass("Humanoid")
@@ -1129,13 +1009,6 @@ addcmd("god",{},function(args,sp)
 	newHum.Health = newHum.MaxHealth
 	notify("God","Enabled")
 end)
-
-
--- ══════════════════════════════════════════════════════════════════════════════
--- CHARACTER APPEARANCE
--- ══════════════════════════════════════════════════════════════════════════════
-
--- invisible
 local invisRunning = false
 addcmd("invisible",{"invis"},function(args,sp)
 	if invisRunning then return end
@@ -1156,8 +1029,6 @@ addcmd("visible",{"vis","uninvisible"},function(args,sp)
 	invisRunning = false
 	notify("Visible","You are now visible")
 end)
-
--- nolimbs / noarms / nolegs
 addcmd("nolimbs",{"rlimbs"},function(args,sp)
 	local c = sp.Character; if not c then return end
 	for _, v in pairs(c:GetChildren()) do
@@ -1176,8 +1047,6 @@ addcmd("nolegs",{"rlegs"},function(args,sp)
 		if v:IsA("BasePart") and v.Name:find("Leg") then v:Destroy() end
 	end
 end)
-
--- hats
 addcmd("drophats",{"drophat"},function(args,sp)
 	local hum = sp.Character:FindFirstChildOfClass("Humanoid")
 	if hum then for _, a in pairs(hum:GetAccessories()) do a.Parent=workspace end end
@@ -1196,8 +1065,6 @@ addcmd("blockhead",{},function(args,sp)
 	local head = sp.Character:FindFirstChild("Head")
 	if head then local m = head:FindFirstChildOfClass("SpecialMesh"); if m then m:Destroy() end end
 end)
-
--- naked / noface
 addcmd("naked",{},function(args,sp)
 	for _, v in pairs(sp.Character:GetDescendants()) do
 		if v:IsA("Clothing") or v:IsA("ShirtGraphic") then v:Destroy() end
@@ -1208,8 +1075,6 @@ addcmd("noface",{"removeface"},function(args,sp)
 		if v:IsA("Decal") and v.Name=="face" then v:Destroy() end
 	end
 end)
-
--- blockhead / creeper
 addcmd("creeper",{},function(args,sp)
 	local c = sp.Character
 	local head = c:FindFirstChild("Head")
@@ -1219,28 +1084,20 @@ addcmd("creeper",{},function(args,sp)
 	if la then la:Destroy() end; if ra then ra:Destroy() end
 	local hum = c:FindFirstChildOfClass("Humanoid"); if hum then hum:RemoveAccessories() end
 end)
-
--- nobgui / noname
 addcmd("nobgui",{"nobillboardgui","noname"},function(args,sp)
 	for _, v in pairs(sp.Character:GetDescendants()) do
 		if v:IsA("BillboardGui") or v:IsA("SurfaceGui") then v:Destroy() end
 	end
 end)
-
--- nilchar / unnilchar
 addcmd("nilchar",{},function(args,sp)
 	if sp.Character then sp.Character.Parent=nil end
 end)
 addcmd("unnilchar",{"nonilchar"},function(args,sp)
 	if sp.Character then sp.Character.Parent=workspace end
 end)
-
--- clearcharappearance
 addcmd("clearchar",{"clearcharappearance","clrchar"},function(args,sp)
 	sp:ClearCharacterAppearance()
 end)
-
--- strengthen / weaken
 addcmd("strengthen",{},function(args,sp)
 	local density = tonumber(args[1]) or 100
 	for _, v in pairs(sp.Character:GetDescendants()) do
@@ -1257,8 +1114,6 @@ addcmd("unweaken",{"unstrengthen"},function(args,sp)
 		if v:IsA("BasePart") then v.CustomPhysicalProperties = PhysicalProperties.new(0.7,0.3,0.5) end
 	end
 end)
-
--- deletevelocity
 addcmd("deletevelocity",{"dv","removeforces"},function(args,sp)
 	for _, v in pairs(sp.Character:GetDescendants()) do
 		if v:IsA("BodyVelocity") or v:IsA("BodyGyro") or v:IsA("BodyForce") or v:IsA("BodyAngularVelocity") then
@@ -1266,35 +1121,24 @@ addcmd("deletevelocity",{"dv","removeforces"},function(args,sp)
 		end
 	end
 end)
-
--- noroot
 addcmd("noroot",{"removeroot","rroot"},function(args,sp)
 	local char = sp.Character; if not char then return end
 	char.Parent=nil
 	local hrp = getRoot(char); if hrp then hrp:Destroy() end
 	char.Parent=workspace
 end)
-
--- split (R15 only)
 addcmd("split",{},function(args,sp)
 	if r15(sp) then
 		local w = sp.Character.UpperTorso:FindFirstChild("Waist")
 		if w then w:Destroy() end
 	else notify("Split","Requires R15") end
 end)
-
--- chardelete
 addcmd("chardelete",{"cd"},function(args,sp)
 	local name = lower(getstring(1,args))
 	for _, v in pairs(sp.Character:GetDescendants()) do
 		if lower(v.Name) == name then v:Destroy() end
 	end
 end)
-
--- ══════════════════════════════════════════════════════════════════════════════
--- ANIMATIONS
--- ══════════════════════════════════════════════════════════════════════════════
-
 local function loadAnim(sp, id, speed, looped)
 	local anim = Instance.new("Animation")
 	anim.AnimationId = "rbxassetid://"..tostring(id):match("%d+") or tostring(id)
@@ -1306,7 +1150,6 @@ local function loadAnim(sp, id, speed, looped)
 	if speed then track:AdjustSpeed(tonumber(speed) or 1) end
 	return track
 end
-
 addcmd("animation",{"anim"},function(args,sp)
 	pcall(loadAnim, sp, args[1], args[2], false)
 end)
@@ -1373,11 +1216,6 @@ addcmd("copyanim",{"copyanimation","copyemote"},function(args,sp)
 		end
 	end
 end)
-
--- ══════════════════════════════════════════════════════════════════════════════
--- TOOLS
--- ══════════════════════════════════════════════════════════════════════════════
-
 addcmd("btools",{},function(args,sp)
 	for i=1,4 do
 		local t=Instance.new("HopperBin"); t.BinType=i
@@ -1451,7 +1289,6 @@ addcmd("grabtools",{},function(args,sp)
 	end)
 	notify("Grabtools","Enabled")
 end)
-
 local currentToolSize, currentGripPos = nil, nil
 addcmd("reach",{},function(args,sp)
 	execCmd("unreach")
@@ -1495,16 +1332,9 @@ addcmd("usetools",{},function(args,sp)
 		end)
 	end
 end)
-
-
--- ══════════════════════════════════════════════════════════════════════════════
--- ESP / VISUAL
--- ══════════════════════════════════════════════════════════════════════════════
-
 local espEnabled  = false
 local chamsEnabled = false
 local espTransparency = 0.3
-
 local function makeESP(plr, teamLogic)
 	task.spawn(function()
 		local folder = Instance.new("Folder")
@@ -1561,7 +1391,6 @@ local function makeESP(plr, teamLogic)
 		end)
 	end)
 end
-
 addcmd("esp",{},function(args,sp)
 	if chamsEnabled then return notify("ESP","Disable chams first") end
 	espEnabled = true
@@ -1588,7 +1417,6 @@ end)
 addcmd("esptransparency",{},function(args)
 	espTransparency = tonumber(args[1]) or 0.3
 end)
-
 addcmd("chams",{},function(args,sp)
 	if espEnabled then return notify("Chams","Disable ESP first") end
 	chamsEnabled = true
@@ -1604,7 +1432,6 @@ addcmd("nochams",{"unchams"},function()
 	end
 	notify("Chams","Disabled")
 end)
-
 addcmd("locate",{},function(args,sp)
 	for _, v in pairs(getPlayer(args[1],sp)) do makeESP(v,false) end
 end)
@@ -1614,8 +1441,6 @@ addcmd("nolocate",{"unlocate"},function(args,sp)
 		if f then f:Destroy() end
 	end
 end)
-
--- xray
 local xrayEnabled = false
 addcmd("xray",{},function()
 	xrayEnabled = true
@@ -1645,8 +1470,6 @@ addcmd("loopxray",{},function()
 	end)
 	xrayEnabled = true
 end)
-
--- hitbox
 addcmd("hitbox",{},function(args,sp)
 	for _, v in pairs(getPlayer(args[1],sp)) do
 		local root = getRoot(v.Character)
@@ -1673,12 +1496,6 @@ addcmd("headsize",{},function(args,sp)
 		end
 	end
 end)
-
-
--- ══════════════════════════════════════════════════════════════════════════════
--- CAMERA
--- ══════════════════════════════════════════════════════════════════════════════
-
 local viewing = nil
 addcmd("view",{"spectate"},function(args,sp)
 	for _, v in pairs(getPlayer(args[1],sp)) do
@@ -1692,7 +1509,6 @@ addcmd("unview",{"unspectate"},function(args,sp)
 	cam.CameraSubject = sp.Character
 	notify("Spectate","Stopped viewing")
 end)
-
 addcmd("firstp",{},function(args,sp) sp.CameraMode="LockFirstPerson" end)
 addcmd("thirdp",{},function(args,sp) sp.CameraMode="Classic" end)
 addcmd("fov",{},function(args) cam.FieldOfView = tonumber(args[1]) or 70 end)
@@ -1719,7 +1535,6 @@ addcmd("tgotocam",{"tweengotocam"},function(args,sp)
 end)
 addcmd("freecam",{"fc"},function()
 	notify("Freecam","Use WASD + mouse to move. Type 'unfreecam' to exit")
-	-- lightweight freecam
 	local oldSubject = cam.CameraSubject
 	cam.CameraType = Enum.CameraType.Scriptable
 	local conn; conn = RunService.RenderStepped:Connect(function(dt)
@@ -1738,12 +1553,7 @@ end)
 addcmd("unfreecam",{"unfc","nofc"},function()
 	_G.MWFC = false; notify("Freecam","Disabled")
 end)
-addcmd("freecamspeed",{"fcspeed"},function(args) end) -- speed handled inline above
-
--- ══════════════════════════════════════════════════════════════════════════════
--- LIGHTING
--- ══════════════════════════════════════════════════════════════════════════════
-
+addcmd("freecamspeed",{"fcspeed"},function(args) end)
 local origLighting = {
 	Brightness = Lighting.Brightness, ClockTime = Lighting.ClockTime,
 	FogEnd = Lighting.FogEnd, FogStart = Lighting.FogStart,
@@ -1787,11 +1597,6 @@ addcmd("nolight",{"unlight"},function(args,sp)
 		if v:IsA("PointLight") then v:Destroy() end
 	end
 end)
-
--- ══════════════════════════════════════════════════════════════════════════════
--- CHAT
--- ══════════════════════════════════════════════════════════════════════════════
-
 local spamming = false
 local spamSpeed = 1
 addcmd("chat",{"say"},function(args,sp) chatMessage(getstring(1,args)) end)
@@ -1841,11 +1646,6 @@ addcmd("unmutevc",{},function(args,sp)
 		pcall(function() game:GetService("VoiceChatInternal"):SubscribePause(v.UserId,false) end)
 	end
 end)
-
--- ══════════════════════════════════════════════════════════════════════════════
--- SERVER / GAME
--- ══════════════════════════════════════════════════════════════════════════════
-
 addcmd("rejoin",{"rj"},function()
 	TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, lp)
 end)
@@ -1914,11 +1714,6 @@ addcmd("render",{},function() RunService:Set3dRenderingEnabled(true) end)
 addcmd("screenshot",{"scrnshot"},function() CoreGui:TakeScreenshot() end)
 addcmd("record",{"rec"},function() CoreGui:ToggleRecording() end)
 addcmd("cancelteleport",{"canceltp"},function() TeleportService:TeleportCancel() end)
-
--- ══════════════════════════════════════════════════════════════════════════════
--- UI / COREGUI
--- ══════════════════════════════════════════════════════════════════════════════
-
 addcmd("enable",{},function(args)
 	local t = args[1] and args[1]:lower()
 	if t=="reset" then StarterGui:SetCore("ResetButtonCallback",true)
@@ -1941,11 +1736,6 @@ addcmd("remotespy",{"rspy"},function()
 	loadstring(game:HttpGet("https://raw.githubusercontent.com/infyiff/backup/main/SimpleSpyV3/main.lua"))()
 end)
 addcmd("notify",{},function(args) notify("Notification", getstring(1,args)) end)
-
--- ══════════════════════════════════════════════════════════════════════════════
--- WORKSPACE
--- ══════════════════════════════════════════════════════════════════════════════
-
 addcmd("delete",{"remove"},function(args)
 	local n = lower(getstring(1,args))
 	for _, v in pairs(workspace:GetDescendants()) do if lower(v.Name)==n then v:Destroy() end end
@@ -2018,11 +1808,6 @@ addcmd("firepp",{"fireproximityprompts"},function(args)
 		end
 	end
 end)
-
--- ══════════════════════════════════════════════════════════════════════════════
--- PLAYER INFO
--- ══════════════════════════════════════════════════════════════════════════════
-
 addcmd("age",{},function(args,sp)
 	for _, v in pairs(getPlayer(args[1],sp)) do
 		notify("Age", v.Name.."'s age: "..v.AccountAge.." days")
@@ -2048,11 +1833,6 @@ end)
 addcmd("unfriend",{},function(args,sp)
 	for _, v in pairs(getPlayer(args[1],sp)) do pcall(function() sp:RevokeFriendship(v) end) end
 end)
-
--- ══════════════════════════════════════════════════════════════════════════════
--- MISC
--- ══════════════════════════════════════════════════════════════════════════════
-
 addcmd("addalias",{},function(args,sp)
 	if #args<2 then return end
 	local cmd = findCmd(lower(args[1]))
@@ -2073,8 +1853,6 @@ end)
 addcmd("setprefix",{},function(args)
 	if args[1] then PREFIX=args[1]; notify("Prefix","Set to: "..PREFIX) end
 end)
-
--- fling
 local flinging = false
 addcmd("fling",{},function(args,sp)
 	flinging = true
@@ -2095,8 +1873,6 @@ addcmd("unfling",{"nofling"},function(args,sp)
 	local root = getRoot(sp.Character)
 	if root then for _, v in pairs(root:GetChildren()) do if v.Name=="MW_Fling" then v:Destroy() end end end
 end)
-
--- loopoof
 local oofing = false
 addcmd("loopoof",{},function()
 	oofing=true
@@ -2114,8 +1890,6 @@ addcmd("loopoof",{},function()
 	end)
 end)
 addcmd("unloopoof",{},function() oofing=false end)
-
--- muteboombox
 addcmd("muteboombox",{},function(args,sp)
 	for _, v in pairs(getPlayer(args[1],sp)) do
 		if v.Character then
@@ -2134,8 +1908,6 @@ addcmd("unmuteboombox",{},function(args,sp)
 		end
 	end
 end)
-
--- autoclick
 local autoclicking = false
 addcmd("autoclick",{},function(args)
 	if not mouse1press or not mouse1release then
@@ -2149,8 +1921,5 @@ addcmd("autoclick",{},function(args)
 	notify("Autoclick","Enabled")
 end)
 addcmd("unautoclick",{"noautoclick"},function() autoclicking=false end)
-
 notify("Mikeyware Cmds","Loaded — prefix: "..PREFIX)
-
--- refresh the name list now that all commands are registered
 if _G.MWCmds then _G.MWCmds._cmdNames = getCmdNames() end
