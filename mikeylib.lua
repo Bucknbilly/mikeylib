@@ -30,7 +30,6 @@ local activeInstances = {}
 local activeSounds    = {}
 
 local globalFlags = {}
-local discordCopied = false
 
 local CONFIG_FOLDER   = "MIKEYWARE_CONFIGS"
 local POSITION_FOLDER = "MIKEYWARE_POSITIONS"
@@ -435,9 +434,7 @@ function UILibrary.new(title, options)
 	self._orderCounter   = makeOrderCounter()
 	self._destroyed      = false
 	self._configName     = configName
-	self._instanceFlags  = {}           -- per-instance flag table
-	self._flagRefs       = {}           -- {flag -> setter fn} for applyFlags()
-	self.Flags           = self._instanceFlags
+	self.Flags           = globalFlags
 
 	local function conn(signal, fn)
 		local c = signal:Connect(fn)
@@ -771,8 +768,7 @@ function UILibrary.new(title, options)
 			self.mainFrame.Size = UDim2.new(0, savedPos.w, 0, savedPos.h)
 			self:_updateScroll()
 		end
-		if discordLink and not discordCopied then
-			discordCopied = true
+		if discordLink then
 			pcall(function()
 				if setclipboard then setclipboard(discordLink) end
 			end)
@@ -790,7 +786,7 @@ end
 function UILibrary:saveConfig()
 	if not self._configName then return false end
 	local data = {}
-	for flag, val in pairs(self._instanceFlags) do
+	for flag, val in pairs(globalFlags) do
 		data[flag] = val
 	end
 	return saveConfig(self._configName, data)
@@ -800,29 +796,10 @@ function UILibrary:loadConfig()
 	if not self._configName then return false end
 	local data = loadConfig(self._configName)
 	if not data then return false end
-	-- clear stale flags before applying
-	for flag in pairs(self._instanceFlags) do
-		self._instanceFlags[flag] = nil
-	end
 	for flag, val in pairs(data) do
-		self._instanceFlags[flag] = val
+		globalFlags[flag] = val
 	end
-	-- auto-apply loaded values to all registered UI components
-	self:applyFlags()
 	return data
-end
-
-function UILibrary:applyFlags()
-	for flag, setter in pairs(self._flagRefs) do
-		local val = self._instanceFlags[flag]
-		if val ~= nil then
-			pcall(setter, val)
-		end
-	end
-end
-
-function UILibrary:_registerFlag(flag, setter)
-	if flag and setter then self._flagRefs[flag] = setter end
 end
 
 function UILibrary:_scheduleResize()
@@ -1159,7 +1136,7 @@ function UILibrary:addToggle(name, default, callback, flag)
 	local row   = makeRow(parent, layoutOrder)
 	local state = default or false
 
-	if flag then self._instanceFlags[flag] = state end
+	if flag then globalFlags[flag] = state end
 
 	local inner = make("Frame", {
 		Size                   = UDim2.new(1, 0, 0, 0),
@@ -1220,7 +1197,7 @@ function UILibrary:addToggle(name, default, callback, flag)
 
 	local function setValue(val, fire)
 		state = val
-		if flag then self._instanceFlags[flag] = val end
+		if flag then globalFlags[flag] = val end
 		updateVisual(val)
 		if fire and callback then pcall(callback, val) end
 	end
@@ -1254,7 +1231,6 @@ function UILibrary:addToggle(name, default, callback, flag)
 	end
 
 	self._toggles[name] = obj
-	if flag then self._flagRefs[flag] = function(v) obj.set(v, true) end end
 	return obj
 end
 
@@ -1263,7 +1239,7 @@ function UILibrary:addCheckbox(name, default, callback, flag)
 	local row   = makeRow(parent, layoutOrder)
 	local state = default or false
 
-	if flag then self._instanceFlags[flag] = state end
+	if flag then globalFlags[flag] = state end
 
 	local inner = make("Frame", {
 		Size                   = UDim2.new(1, 0, 0, 0),
@@ -1331,7 +1307,7 @@ function UILibrary:addCheckbox(name, default, callback, flag)
 
 	local function setValue(val, fire)
 		state = val
-		if flag then self._instanceFlags[flag] = val end
+		if flag then globalFlags[flag] = val end
 		tween(box, { BackgroundColor3 = val and Color3.fromRGB(80, 200, 120) or Color3.fromRGB(40, 40, 40) }, 0.15)
 		tween(checkmark, { TextTransparency = val and 0 or 1 }, 0.1)
 		if fire and callback then pcall(callback, val) end
@@ -1345,7 +1321,6 @@ function UILibrary:addCheckbox(name, default, callback, flag)
 	if self._activeTab then table.insert(self._activeTab.items, row) end
 	if not self._minimized then self:resize() end
 
-	if flag then self:_registerFlag(flag, function(v) local s = {set=function(vv,si) setValue(vv, not si) end}; s.set(v,true) end) end
 	return {
 		set         = function(v, silent) setValue(v, not silent) end,
 		get         = function() return state end,
@@ -1362,7 +1337,7 @@ function UILibrary:addRadioGroup(name, options, default, callback, flag)
 	local row     = makeRow(parent, layoutOrder)
 	local selected = default or options[1]
 
-	if flag then self._instanceFlags[flag] = selected end
+	if flag then globalFlags[flag] = selected end
 
 	local inner = make("Frame", {
 		Size                   = UDim2.new(1, 0, 0, 0),
@@ -1400,7 +1375,7 @@ function UILibrary:addRadioGroup(name, options, default, callback, flag)
 
 	local function setSelected(val, fire)
 		selected = val
-		if flag then self._instanceFlags[flag] = val end
+		if flag then globalFlags[flag] = val end
 		for _, rb in pairs(radioButtons) do
 			local isActive = rb.value == val
 			tween(rb.dot, { BackgroundColor3 = isActive and Color3.fromRGB(80, 200, 120) or Color3.fromRGB(40, 40, 40) }, 0.15)
@@ -1474,7 +1449,6 @@ function UILibrary:addRadioGroup(name, options, default, callback, flag)
 	if self._activeTab then table.insert(self._activeTab.items, row) end
 	if not self._minimized then self:resize() end
 
-	if flag then self:_registerFlag(flag, function(v) setSelected(v, false) end) end
 	return {
 		get = function() return selected end,
 		set = function(v, silent) setSelected(v, not silent) end,
@@ -1494,7 +1468,7 @@ function UILibrary:addSlider(name, min, max, default, step, callback, flag)
 	local row     = makeRow(parent, layoutOrder)
 	local current = min + math.round((math.clamp(default or min, min, correctedMax) - min) / step) * step
 
-	if flag then self._instanceFlags[flag] = current end
+	if flag then globalFlags[flag] = current end
 
 	local inner = make("Frame", {
 		Size                   = UDim2.new(1, 0, 0, 0),
@@ -1597,7 +1571,7 @@ function UILibrary:addSlider(name, min, max, default, step, callback, flag)
 		local ratio   = math.clamp((x - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
 		local snapped = snapValue(min + ratio * (correctedMax - min))
 		current = snapped
-		if flag then self._instanceFlags[flag] = snapped end
+		if flag then globalFlags[flag] = snapped end
 		local p = getProgress(snapped)
 		fill.Size       = UDim2.new(p, 0, 1, 0)
 		knob.Position   = UDim2.new(p, 0, 0.5, 0)
@@ -1627,11 +1601,10 @@ function UILibrary:addSlider(name, min, max, default, step, callback, flag)
 	if self._activeTab then table.insert(self._activeTab.items, row) end
 	if not self._minimized then self:resize() end
 
-	if flag then self:_registerFlag(flag, function(v) local snapped = snapValue(v); current=snapped; local p=getProgress(snapped); fill.Size=UDim2.new(p,0,1,0); knob.Position=UDim2.new(p,0,0.5,0); valueLabel.Text=tostring(snapped); self._instanceFlags[flag]=snapped end) end
 	return {
 		set = function(v)
 			current = snapValue(v)
-			if flag then self._instanceFlags[flag] = current end
+			if flag then globalFlags[flag] = current end
 			local p = getProgress(current)
 			fill.Size       = UDim2.new(p, 0, 1, 0)
 			knob.Position   = UDim2.new(p, 0, 0.5, 0)
@@ -1711,7 +1684,7 @@ function UILibrary:addTextBox(name, placeholder, maxLength, callback, options)
 
 	self._conn(box:GetPropertyChangedSignal("Text"), function()
 		if #box.Text > maxLength then box.Text = box.Text:sub(1, maxLength) end
-		if flag then self._instanceFlags[flag] = box.Text end
+		if flag then globalFlags[flag] = box.Text end
 		if liveCallback then pcall(liveCallback, box.Text) end
 	end)
 
@@ -1722,12 +1695,11 @@ function UILibrary:addTextBox(name, placeholder, maxLength, callback, options)
 	if self._activeTab then table.insert(self._activeTab.items, row) end
 	if not self._minimized then self:resize() end
 
-	if flag and options and options.flag then self:_registerFlag(options.flag, function(v) box.Text=tostring(v):sub(1,maxLength); self._instanceFlags[options.flag]=box.Text end) end
 	return {
 		get   = function()  return box.Text end,
 		set   = function(v)
 			box.Text = tostring(v):sub(1, maxLength)
-			if flag then self._instanceFlags[flag] = box.Text end
+			if flag then globalFlags[flag] = box.Text end
 		end,
 		clear = function()  box.Text = "" end,
 		setDisabled = function(val)
@@ -1748,7 +1720,7 @@ function UILibrary:addDropdown(name, options, default, callback, flag)
 	local selected       = default or options[1]
 	local currentOptions = { table.unpack(options) }
 
-	if flag then self._instanceFlags[flag] = selected end
+	if flag then globalFlags[flag] = selected end
 
 	local inner = make("Frame", {
 		Size                   = UDim2.new(1, 0, 0, 0),
@@ -1883,7 +1855,7 @@ function UILibrary:addDropdown(name, options, default, callback, flag)
 		reg(optBtn.MouseLeave:Connect(function() tween(optBtn, { BackgroundTransparency = 0.5 }, 0.1) end))
 		reg(optBtn.MouseButton1Click:Connect(function()
 			selected      = value
-			if flag then self._instanceFlags[flag] = value end
+			if flag then globalFlags[flag] = value end
 			dropBtn.Text  = tostring(value) .. " ▾"
 			closePanel()
 			if callback then pcall(callback, value) end
@@ -1917,12 +1889,11 @@ function UILibrary:addDropdown(name, options, default, callback, flag)
 	if self._activeTab then table.insert(self._activeTab.items, row) end
 	if not self._minimized then self:resize() end
 
-	if flag then self:_registerFlag(flag, function(v) selected=v; self._instanceFlags[flag]=v; dropBtn.Text=tostring(v)..' u25BE' end) end
 	return {
 		get = function() return selected end,
 		set = function(v)
 			selected     = v
-			if flag then self._instanceFlags[flag] = v end
+			if flag then globalFlags[flag] = v end
 			dropBtn.Text = tostring(v) .. " ▾"
 		end,
 		setDisabled = function(val)
@@ -1932,10 +1903,6 @@ function UILibrary:addDropdown(name, options, default, callback, flag)
 		end,
 		refresh = function(newOptions)
 			if not newOptions or #newOptions == 0 then newOptions = { "" } end
-			-- clear stale selected entries that no longer exist
-			local valid = {}
-			for _, v in ipairs(newOptions) do valid[v] = true end
-			for k in pairs(selected) do if not valid[k] then selected[k] = nil end end
 			currentOptions = { table.unpack(newOptions) }
 			for _, c in ipairs(optionConns) do
 				if c and c.Connected then c:Disconnect() end
@@ -1995,7 +1962,7 @@ function UILibrary:addMultiDropdown(name, options, defaults, callback, flag)
 		end
 	end
 
-	if flag then self._instanceFlags[flag] = getSelectedList() end
+	if flag then globalFlags[flag] = getSelectedList() end
 
 	local inner = make("Frame", {
 		Size                   = UDim2.new(1, 0, 0, 0),
@@ -2178,7 +2145,7 @@ function UILibrary:addMultiDropdown(name, options, defaults, callback, flag)
 				tween(cb, { BackgroundColor3 = nowChecked and Color3.fromRGB(80, 200, 120) or Color3.fromRGB(40, 40, 40) }, 0.12)
 				tween(checkTick, { TextTransparency = nowChecked and 0 or 1 }, 0.1)
 				dropBtn.Text = updateBtnText()
-				if flag then self._instanceFlags[flag] = getSelectedList() end
+				if flag then globalFlags[flag] = getSelectedList() end
 				if callback then pcall(callback, getSelectedList()) end
 			end))
 		end
@@ -2212,13 +2179,12 @@ function UILibrary:addMultiDropdown(name, options, defaults, callback, flag)
 	if self._activeTab then table.insert(self._activeTab.items, row) end
 	if not self._minimized then self:resize() end
 
-	if flag then self:_registerFlag(flag, function(v) if type(v)=='table' then selected={}; for _,x in ipairs(v) do selected[x]=true end; self._instanceFlags[flag]=v; dropBtn.Text=updateBtnText(); rebuildOptions() end end) end
 	return {
 		get     = getSelectedList,
 		set     = function(list)
 			selected = {}
 			for _, v in ipairs(list) do selected[v] = true end
-			if flag then self._instanceFlags[flag] = list end
+			if flag then globalFlags[flag] = list end
 			dropBtn.Text = updateBtnText()
 			rebuildOptions()
 		end,
@@ -2239,7 +2205,7 @@ function UILibrary:addColorPicker(name, defaultColor, callback, flag)
 	local h, s, v = Color3.toHSV(defaultColor)
 	local currentColor = defaultColor
 
-	if flag then self._instanceFlags[flag] = currentColor end
+	if flag then globalFlags[flag] = currentColor end
 
 	local inner = make("Frame", {
 		Size                   = UDim2.new(1, 0, 0, 0),
@@ -2399,7 +2365,7 @@ function UILibrary:addColorPicker(name, defaultColor, callback, flag)
 		s = math.clamp(newS, 0, 1)
 		v = math.clamp(newV, 0, 1)
 		currentColor = Color3.fromHSV(h, s, v)
-		if flag then self._instanceFlags[flag] = currentColor end
+		if flag then globalFlags[flag] = currentColor end
 		svCanvas.BackgroundColor3         = Color3.fromHSV(h, 1, 1)
 		svCursor.Position                  = UDim2.new(s, 0, 1 - v, 0)
 		hueCursor.Position                 = UDim2.new(h, 0, 0.5, 0)
@@ -2414,10 +2380,8 @@ function UILibrary:addColorPicker(name, defaultColor, callback, flag)
 
 	local svDragging  = false
 	local hueDragging = false
-	local _disabled   = false
 
 	self._conn(svCanvas.InputBegan, function(inp)
-		if _disabled then return end
 		if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
 			svDragging = true
 			local rx = math.clamp((inp.Position.X - svCanvas.AbsolutePosition.X) / svCanvas.AbsoluteSize.X, 0, 1)
@@ -2473,7 +2437,6 @@ function UILibrary:addColorPicker(name, defaultColor, callback, flag)
 	end)
 
 	self._conn(preview.MouseButton1Click, function()
-		if _disabled then return end
 		if self._minimized then return end
 		if isOpen then
 			isOpen              = false
@@ -2504,17 +2467,11 @@ function UILibrary:addColorPicker(name, defaultColor, callback, flag)
 	if self._activeTab then table.insert(self._activeTab.items, row) end
 	if not self._minimized then self:resize() end
 
-	if flag then self:_registerFlag(flag, function(v) if typeof(v)=='Color3' then local nh,ns,nv=Color3.toHSV(v); applyColor(nh,ns,nv) end end) end
 	return {
 		get = function() return currentColor end,
 		set = function(color)
 			local nh, ns, nv = Color3.toHSV(color)
 			applyColor(nh, ns, nv)
-		end,
-		setDisabled = function(val)
-			_disabled = val
-			tween(preview, { BackgroundTransparency = val and 0.5 or 0 }, 0.15)
-			if val and isOpen then isOpen = false; pickerPanel.Visible = false end
 		end,
 		destroy = function()
 			isOpen = false
@@ -3426,7 +3383,6 @@ local HUD_THEMES = {
 		pfpRing    = Color3.fromRGB(180, 20, 40),
 		divider    = Color3.fromRGB(130, 18, 32),
 		subtext    = Color3.fromRGB(200, 50, 70),
-		border     = Color3.fromRGB(130, 18, 32),
 	},
 	Dark = {
 		bar        = Color3.fromRGB(14, 14, 14),
@@ -3449,7 +3405,6 @@ local HUD_THEMES = {
 		pfpRing    = Color3.fromRGB(80, 200, 120),
 		divider    = Color3.fromRGB(50, 50, 50),
 		subtext    = Color3.fromRGB(80, 200, 120),
-		border     = Color3.fromRGB(55, 55, 55),
 	},
 	Slate = {
 		bar        = Color3.fromRGB(18, 22, 30),
@@ -3472,7 +3427,6 @@ local HUD_THEMES = {
 		pfpRing    = Color3.fromRGB(70, 120, 220),
 		divider    = Color3.fromRGB(45, 60, 90),
 		subtext    = Color3.fromRGB(70, 120, 220),
-		border     = Color3.fromRGB(45, 60, 90),
 	},
 }
 
@@ -3487,9 +3441,6 @@ local function hudPlaySound(id, vol)
 end
 
 function UILibrary.addHUD(options)
-	-- prevent double-loading
-	local existingHud = guiParent:FindFirstChild("AK_HUD_GUI")
-	if existingHud then existingHud:Destroy() end
 	options = options or {}
 
 	-- ── resolve theme ────────────────────────────────────────────────────
@@ -3502,8 +3453,8 @@ function UILibrary.addHUD(options)
 	end
 
 	-- ── resolve position ─────────────────────────────────────────────────
-	-- options.position = "BelowChat" | "BottomLeft" | "BottomRight" | "TopLeft" | "TopRight"
-	local pos = options.position or "BelowChat"
+	-- options.position = "BottomLeft" | "BottomRight" | "TopLeft" | "TopRight"
+	local pos = options.position or "BottomLeft"
 
 	-- ── load saved HUD config ────────────────────────────────────────────
 	local hudCfg = {}
@@ -3541,13 +3492,12 @@ function UILibrary.addHUD(options)
 	})
 
 	-- ── bar dimensions + position ─────────────────────────────────────────
-	local BAR_W, BAR_H = 520, 40
+	local BAR_W, BAR_H = 500, 40
 	local MARGIN       = 14
 
 	local function getBarPosition(collapsed)
 		local h = collapsed and 0 or BAR_H
-		if pos == "BelowChat"   then return UDim2.new(0, MARGIN, 0, 160) end  -- under Roblox chat
-		if pos == "BottomLeft"  then return UDim2.new(0, MARGIN, 1, -(h + MARGIN)) end
+		if pos == "BottomLeft"  then return UDim2.new(0, MARGIN,   1, -(h + MARGIN)) end
 		if pos == "BottomRight" then return UDim2.new(1, -(BAR_W + MARGIN), 1, -(h + MARGIN)) end
 		if pos == "TopRight"    then return UDim2.new(1, -(BAR_W + MARGIN), 0, MARGIN) end
 		return UDim2.new(0, MARGIN, 0, MARGIN) -- TopLeft default
@@ -3693,7 +3643,7 @@ function UILibrary.addHUD(options)
 
 	-- name column stacked vertically
 	local nameCol = make("Frame", {
-		Size             = UDim2.new(0, 120, 1, 0),
+		Size             = UDim2.new(0, 110, 1, 0),
 		BackgroundTransparency = 1,
 		LayoutOrder      = 2,
 		Parent           = playerSection,
@@ -3706,23 +3656,23 @@ function UILibrary.addHUD(options)
 	make("UIPadding", { PaddingTop = UDim.new(0,4), PaddingBottom = UDim.new(0,4), Parent = nameCol })
 
 	make("TextLabel", {
-		Size = UDim2.new(1,0,0,16), BackgroundTransparency = 1,
+		Size = UDim2.new(1,0,0,14), BackgroundTransparency = 1,
 		Text = lp.DisplayName, TextColor3 = C.text,
-		TextSize = 14, Font = Enum.Font.GothamBold,
+		TextSize = 12, Font = Enum.Font.GothamBold,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextTruncate = Enum.TextTruncate.AtEnd, Parent = nameCol,
 	})
 	make("TextLabel", {
-		Size = UDim2.new(1,0,0,13), BackgroundTransparency = 1,
+		Size = UDim2.new(1,0,0,11), BackgroundTransparency = 1,
 		Text = "@" .. lp.Name, TextColor3 = C.subtext,
-		TextSize = 11, Font = Enum.Font.Gotham,
+		TextSize = 9, Font = Enum.Font.Gotham,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextTruncate = Enum.TextTruncate.AtEnd, Parent = nameCol,
 	})
 	local clockLabel = make("TextLabel", {
-		Size = UDim2.new(1,0,0,11), BackgroundTransparency = 1,
+		Size = UDim2.new(1,0,0,10), BackgroundTransparency = 1,
 		Text = "", TextColor3 = C.textMuted,
-		TextSize = 10, Font = Enum.Font.Gotham,
+		TextSize = 9, Font = Enum.Font.Gotham,
 		TextXAlignment = Enum.TextXAlignment.Left, Parent = nameCol,
 	})
 
@@ -4119,8 +4069,6 @@ function UILibrary.addHUD(options)
 	-- ── collapse button ───────────────────────────────────────────────────
 	local collapsed   = false
 	local isBottom    = (pos == "BottomLeft" or pos == "BottomRight")
-	-- BelowChat sits at the top area, collapse arrow points up like TopLeft
-	local arrowDown   = not isBottom
 	local collapseBtn = make("TextButton", {
 		Size             = UDim2.new(0, 48, 0, 12),
 		AnchorPoint      = Vector2.new(0.5, 0),
@@ -4477,7 +4425,7 @@ function UILibrary.addHUD(options)
 		sbStatus.Text = "✅ Loaded"
 		sbStatus.TextColor3 = C.green
 		sbRefresh.Text = "🔄 Refresh"
-		sbRefresh.Active = true
+		sbRefresh.Active = true	
 		sbRenderServers()
 	end
 
