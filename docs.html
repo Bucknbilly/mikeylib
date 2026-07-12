@@ -164,6 +164,7 @@ li{color:var(--dim);font-size:13px;margin-bottom:5px}
       <a class="ni" href="#notify"><span class="npip"></span>notify()</a>
       <a class="ni" href="#confirm"><span class="npip"></span>confirm()</a>
       <a class="ni" href="#addconnection"><span class="npip"></span>addConnection()</a>
+      <a class="ni" href="#fetchdiscord"><span class="npip"></span>fetchDiscord()</a>
       <a class="ni" href="#keysystem"><span class="npip"></span>Key System</a>
       <a class="ni" href="#loadingscreen"><span class="npip"></span>Loading Screen</a>
       <a class="ni" href="#hud"><span class="npip"></span>addHUD()</a>
@@ -304,7 +305,7 @@ li{color:var(--dim);font-size:13px;margin-bottom:5px}
     <div class="cb2">
       <div class="ph">Options</div>
       <div class="pm"><span class="pn">hideKey</span><span class="pt">Enum.KeyCode</span><span class="pd">Toggle visibility key. Default <code>RightShift</code>.</span></div>
-      <div class="pm"><span class="pn">discord</span><span class="pt">string</span><span class="pd">Discord URL — copied to clipboard on first load and auto-adds a discord topbar button.</span></div>
+      <div class="pm"><span class="pn">discord</span><span class="pt">string</span><span class="pd">Discord invite URL or code — auto-copied to clipboard on load, adds a discord topbar button, and fetches live server stats (name, member count, online count, icon) which are shown as a paragraph in the window. Also exposes <code>win.fetchDiscord()</code> and <code>win.getDiscordData()</code>.</span></div>
       <div class="pm"><span class="pn">configName</span><span class="pt">string</span><span class="pd">Enables flag/config system. Saves to <code>MIKEYWARE_CONFIGS/name.json</code>.</span></div>
       <div class="pm"><span class="pn">obfuscate</span><span class="pt">boolean</span><span class="pd">Randomize the ScreenGui name. Default <code>false</code>.</span></div>
       <div class="pm"><span class="pn">theme</span><span class="pt">string</span><span class="pd">Apply a named theme on creation: <code>"Dark"</code> <code>"Crimson"</code> <code>"Slate"</code> <code>"Light"</code> or any custom name.</span></div>
@@ -945,6 +946,59 @@ li{color:var(--dim);font-size:13px;margin-bottom:5px}
 </div>
 
 <!-- key system -->
+<div class="sec" id="fetchdiscord">
+  <h2>fetchDiscord()</h2>
+  <p class="sdesc">Fetches live Discord server info from the Discord API using the executor's HTTP request. Returns a data table with name, description, member count, online count, icon URL, and the raw API response. Works with a full URL, <code>discord.gg/code</code>, or a bare invite code.</p>
+  <div class="card open">
+    <div class="ch" onclick="tog(this)"><span class="tag tnew">NEW</span><span class="csig"><span class="var">data</span> = UILibrary.<span class="fn">fetchDiscord</span><span class="args">( inviteCode )</span></span><span class="carr">▾</span></div>
+    <div class="cb2">
+      <div class="ph">Parameters</div>
+      <div class="pm"><span class="pn">inviteCode</span><span class="pt">string</span><span class="pd">Bare code (<code>"abc123"</code>), <code>"discord.gg/abc123"</code>, or full <code>"https://discord.gg/abc123"</code> URL.</span></div>
+      <div class="ph" style="margin-top:10px">Returns — data table or nil</div>
+      <div class="pm"><span class="pn">data.name</span><span class="pt">string</span><span class="pd">Server name.</span></div>
+      <div class="pm"><span class="pn">data.description</span><span class="pt">string</span><span class="pd">Server description (empty string if none).</span></div>
+      <div class="pm"><span class="pn">data.id</span><span class="pt">string</span><span class="pd">Guild ID.</span></div>
+      <div class="pm"><span class="pn">data.icon</span><span class="pt">string</span><span class="pd">Full CDN icon URL (128px PNG), or <code>nil</code> if no icon.</span></div>
+      <div class="pm"><span class="pn">data.members</span><span class="pt">number</span><span class="pd">Approximate total member count.</span></div>
+      <div class="pm"><span class="pn">data.online</span><span class="pt">number</span><span class="pd">Approximate online member count.</span></div>
+      <div class="pm"><span class="pn">data.inviteCode</span><span class="pt">string</span><span class="pd">Resolved bare invite code.</span></div>
+      <div class="pm"><span class="pn">data.inviteUrl</span><span class="pt">string</span><span class="pd">Full <code>https://discord.gg/code</code> URL.</span></div>
+      <div class="pm"><span class="pn">data.raw</span><span class="pt">table</span><span class="pd">Full decoded Discord API response.</span></div>
+      <div class="note"><span class="nico">⚠</span><span>Returns <code>nil</code> if the request fails, the invite is invalid, or the executor has no HTTP access. Always wrap usage in a <code>task.spawn</code> since it yields.</span></div>
+      <div class="cw"><div class="cbar"><span class="clang">lua — static call</span><button class="cbtn" onclick="cp(this)">copy</button></div>
+      <pre><code><span class="var">task</span><span class="op">.</span><span class="fn">spawn</span><span class="op">(</span><span class="kw">function</span><span class="op">()</span>
+    <span class="kw">local</span> <span class="var">data</span> <span class="op">=</span> <span class="var">UILibrary</span><span class="op">.</span><span class="fn">fetchDiscord</span><span class="op">(</span><span class="str">"discord.gg/yourcode"</span><span class="op">)</span>
+    <span class="kw">if</span> <span class="var">data</span> <span class="kw">then</span>
+        <span class="fn">print</span><span class="op">(</span><span class="var">data</span><span class="op">.</span><span class="var">name</span><span class="op">)</span>
+        <span class="fn">print</span><span class="op">(</span><span class="var">data</span><span class="op">.</span><span class="var">members</span><span class="op">,</span> <span class="str">"members  "</span><span class="op">,</span> <span class="var">data</span><span class="op">.</span><span class="var">online</span><span class="op">,</span> <span class="str">"online"</span><span class="op">)</span>
+        <span class="var">win</span><span class="op">:</span><span class="fn">addParagraph</span><span class="op">(</span><span class="var">data</span><span class="op">.</span><span class="var">name</span><span class="op">,</span>
+            <span class="str">"Members: "</span> <span class="op">..</span> <span class="var">data</span><span class="op">.</span><span class="var">members</span> <span class="op">..</span> <span class="str">"  Online: "</span> <span class="op">..</span> <span class="var">data</span><span class="op">.</span><span class="var">online</span><span class="op">, {</span>
+            <span class="var">Image</span>     <span class="op">=</span> <span class="var">data</span><span class="op">.</span><span class="var">icon</span><span class="op">,</span>
+            <span class="var">ImageSize</span> <span class="op">=</span> <span class="num">42</span><span class="op">,</span>
+            <span class="var">Buttons</span>   <span class="op">= {{ </span><span class="var">Title</span><span class="op">=</span><span class="str">"Join"</span><span class="op">,</span> <span class="var">Callback</span><span class="op">=</span><span class="kw">function</span><span class="op">()</span>
+                <span class="fn">setclipboard</span><span class="op">(</span><span class="var">data</span><span class="op">.</span><span class="var">inviteUrl</span><span class="op">)</span>
+                <span class="var">win</span><span class="op">:</span><span class="fn">notify</span><span class="op">(</span><span class="str">"Discord"</span><span class="op">,</span> <span class="str">"Link copied!"</span><span class="op">,</span> <span class="str">"discord"</span><span class="op">)</span>
+            <span class="kw">end</span> <span class="op">}},</span>
+        <span class="op">})</span>
+    <span class="kw">end</span>
+<span class="kw">end</span><span class="op">)</span></code></pre></div>
+      <div class="cw"><div class="cbar"><span class="clang">lua — auto via discord option</span><button class="cbtn" onclick="cp(this)">copy</button></div>
+      <pre><code><span class="kw">local</span> <span class="var">win</span> <span class="op">=</span> <span class="var">UILibrary</span><span class="op">.</span><span class="fn">new</span><span class="op">(</span><span class="str">"My Script"</span><span class="op">, {</span>
+    <span class="var">discord</span> <span class="op">=</span> <span class="str">"https://discord.gg/yourcode"</span><span class="op">,</span>
+<span class="op">})</span>
+<span class="op">-- Clicking the discord topbar button auto-fetches and shows a paragraph</span>
+<span class="op">-- with server name, icon, member/online count, Join + Refresh buttons.</span>
+
+<span class="op">-- Access cached data after first fetch:</span>
+<span class="kw">local</span> <span class="var">data</span> <span class="op">=</span> <span class="var">win</span><span class="op">.</span><span class="fn">getDiscordData</span><span class="op">()</span>
+
+<span class="op">-- Re-fetch fresh data:</span>
+<span class="kw">local</span> <span class="var">fresh</span> <span class="op">=</span> <span class="var">win</span><span class="op">.</span><span class="fn">fetchDiscord</span><span class="op">()</span></code></pre></div>
+    </div>
+  </div>
+</div>
+
+<!-- key system -->
 <div class="sec" id="keysystem">
   <h2>Key System</h2>
   <p class="sdesc">Gate the window behind a key prompt. Pass <code>keySystem</code> in <code>UILibrary.new()</code> options. The window is hidden until the validator function returns <code>true</code>.</p>
@@ -987,22 +1041,51 @@ li{color:var(--dim);font-size:13px;margin-bottom:5px}
 <!-- loading screen -->
 <div class="sec" id="loadingscreen">
   <h2>Loading Screen</h2>
-  <p class="sdesc">Full-screen overlay that plays a progress bar animation before revealing the window. Pass <code>loadingScreen</code> in <code>UILibrary.new()</code> options.</p>
+  <p class="sdesc">Full-screen overlay with a progress bar animation before the window appears. Works standalone or chained after the key system. Pass <code>loadingScreen</code> in <code>UILibrary.new()</code> options.</p>
   <div class="card open">
-    <div class="ch" onclick="tog(this)"><span class="tag tnew">NEW</span><span class="csig">options.<span class="fn">loadingScreen</span><span class="args"> = { title, subtitle, enabled }</span></span><span class="carr">▾</span></div>
+    <div class="ch" onclick="tog(this)"><span class="tag tnew">UPDATED</span><span class="csig">options.<span class="fn">loadingScreen</span><span class="args"> = { title, subtitle, duration, bgColor, barColor, ... }</span></span><span class="carr">▾</span></div>
     <div class="cb2">
-      <div class="ph">loadingScreen fields</div>
+      <div class="ph">Fields</div>
       <div class="pm"><span class="pn">title <span class="po">optional</span></span><span class="pt">string</span><span class="pd">Large center text. Defaults to the window title.</span></div>
       <div class="pm"><span class="pn">subtitle <span class="po">optional</span></span><span class="pt">string</span><span class="pd">Smaller text below title. Default <code>"Please wait..."</code>.</span></div>
-      <div class="pm"><span class="pn">enabled <span class="po">optional</span></span><span class="pt">boolean</span><span class="pd">Set to <code>false</code> to disable. Default <code>true</code>.</span></div>
-      <div class="tip"><span class="tico">✦</span><span>Loading screen is skipped when <code>keySystem</code> is also active.</span></div>
-      <div class="cw"><div class="cbar"><span class="clang">lua</span><button class="cbtn" onclick="cp(this)">copy</button></div>
+      <div class="pm"><span class="pn">duration <span class="po">optional</span></span><span class="pt">number</span><span class="pd">Seconds the progress bar takes to fill. Default <code>1.2</code>.</span></div>
+      <div class="pm"><span class="pn">bgColor <span class="po">optional</span></span><span class="pt">Color3</span><span class="pd">Full-screen background color. Default near-black.</span></div>
+      <div class="pm"><span class="pn">barColor <span class="po">optional</span></span><span class="pt">Color3</span><span class="pd">Progress bar fill color. Defaults to the active theme accent.</span></div>
+      <div class="pm"><span class="pn">titleColor <span class="po">optional</span></span><span class="pt">Color3</span><span class="pd">Title text color. Default white.</span></div>
+      <div class="pm"><span class="pn">subtitleColor <span class="po">optional</span></span><span class="pt">Color3</span><span class="pd">Subtitle text color. Default muted grey.</span></div>
+      <div class="pm"><span class="pn">titleSize <span class="po">optional</span></span><span class="pt">number</span><span class="pd">Title font size. Default <code>26</code>.</span></div>
+      <div class="pm"><span class="pn">subtitleSize <span class="po">optional</span></span><span class="pt">number</span><span class="pd">Subtitle font size. Default <code>13</code>.</span></div>
+      <div class="pm"><span class="pn">logo <span class="po">optional</span></span><span class="pt">string | number</span><span class="pd">Lucide name, <code>rbxassetid://</code>, or plain ID. Renders a 64px image above the title.</span></div>
+      <div class="pm"><span class="pn">enabled <span class="po">optional</span></span><span class="pt">boolean</span><span class="pd">Set to <code>false</code> to skip. Default <code>true</code>.</span></div>
+      <div class="tip"><span class="tico">✦</span><span>When <code>keySystem</code> is also set, the loading screen plays <strong>after</strong> a successful key entry — not before.</span></div>
+      <div class="cw"><div class="cbar"><span class="clang">lua — full example</span><button class="cbtn" onclick="cp(this)">copy</button></div>
       <pre><code><span class="kw">local</span> <span class="var">win</span> <span class="op">=</span> <span class="var">UILibrary</span><span class="op">.</span><span class="fn">new</span><span class="op">(</span><span class="str">"My Script"</span><span class="op">, {</span>
     <span class="var">loadingScreen</span> <span class="op">= {</span>
-        <span class="var">title</span>    <span class="op">=</span> <span class="str">"My Script"</span><span class="op">,</span>
-        <span class="var">subtitle</span> <span class="op">=</span> <span class="str">"Loading assets..."</span><span class="op">,</span>
+        <span class="var">title</span>         <span class="op">=</span> <span class="str">"My Script"</span><span class="op">,</span>
+        <span class="var">subtitle</span>      <span class="op">=</span> <span class="str">"Loading assets, please wait..."</span><span class="op">,</span>
+        <span class="var">duration</span>      <span class="op">=</span> <span class="num">2</span><span class="op">,</span>
+        <span class="var">bgColor</span>       <span class="op">=</span> <span class="fn">Color3</span><span class="op">.</span><span class="fn">fromRGB</span><span class="op">(</span><span class="num">6</span><span class="op">,</span> <span class="num">6</span><span class="op">,</span> <span class="num">10</span><span class="op">),</span>
+        <span class="var">barColor</span>      <span class="op">=</span> <span class="fn">Color3</span><span class="op">.</span><span class="fn">fromRGB</span><span class="op">(</span><span class="num">100</span><span class="op">,</span> <span class="num">180</span><span class="op">,</span> <span class="num">255</span><span class="op">),</span>
+        <span class="var">titleColor</span>    <span class="op">=</span> <span class="fn">Color3</span><span class="op">.</span><span class="fn">fromRGB</span><span class="op">(</span><span class="num">255</span><span class="op">,</span> <span class="num">255</span><span class="op">,</span> <span class="num">255</span><span class="op">),</span>
+        <span class="var">subtitleColor</span> <span class="op">=</span> <span class="fn">Color3</span><span class="op">.</span><span class="fn">fromRGB</span><span class="op">(</span><span class="num">120</span><span class="op">,</span> <span class="num">140</span><span class="op">,</span> <span class="num">180</span><span class="op">),</span>
+        <span class="var">titleSize</span>     <span class="op">=</span> <span class="num">28</span><span class="op">,</span>
+        <span class="var">subtitleSize</span>  <span class="op">=</span> <span class="num">13</span><span class="op">,</span>
+        <span class="var">logo</span>          <span class="op">=</span> <span class="str">"star"</span><span class="op">,</span>
     <span class="op">},</span>
 <span class="op">})</span></code></pre></div>
+      <div class="cw"><div class="cbar"><span class="clang">lua — with keySystem</span><button class="cbtn" onclick="cp(this)">copy</button></div>
+      <pre><code><span class="kw">local</span> <span class="var">win</span> <span class="op">=</span> <span class="var">UILibrary</span><span class="op">.</span><span class="fn">new</span><span class="op">(</span><span class="str">"My Script"</span><span class="op">, {</span>
+    <span class="var">keySystem</span> <span class="op">= {</span>
+        <span class="var">title</span>     <span class="op">=</span> <span class="str">"Key Required"</span><span class="op">,</span>
+        <span class="var">validator</span> <span class="op">=</span> <span class="kw">function</span><span class="op">(</span><span class="var">k</span><span class="op">)</span> <span class="kw">return</span> <span class="var">k</span> <span class="op">==</span> <span class="str">"mykey123"</span> <span class="kw">end</span><span class="op">,</span>
+    <span class="op">},</span>
+    <span class="var">loadingScreen</span> <span class="op">= {</span>
+        <span class="var">title</span>    <span class="op">=</span> <span class="str">"My Script"</span><span class="op">,</span>
+        <span class="var">subtitle</span> <span class="op">=</span> <span class="str">"Verified! Loading..."</span><span class="op">,</span>
+        <span class="var">duration</span> <span class="op">=</span> <span class="num">1.5</span><span class="op">,</span>
+    <span class="op">},</span>
+<span class="op">})</span>
+<span class="op">-- Flow: key screen → correct key → loading animation → window appears</span></code></pre></div>
     </div>
   </div>
 </div>
@@ -1022,7 +1105,7 @@ li{color:var(--dim);font-size:13px;margin-bottom:5px}
       <div class="pm"><span class="pn">Player section</span><span class="pt">—</span><span class="pd">Avatar thumbnail, display name, username, live clock.</span></div>
       <div class="pm"><span class="pn">Stats section</span><span class="pt">—</span><span class="pd">FPS (color-coded), Ping ms (color-coded), executor name, current game name.</span></div>
       <div class="pm"><span class="pn">Server Browser</span><span class="pt">—</span><span class="pd">Fetches public servers, tab-filtered (All / Low Ping / Most Players / Few Players), one-click join.</span></div>
-      <div class="pm"><span class="pn">Settings panel</span><span class="pt">—</span><span class="pd">Toggle click/hover sounds, set custom hover sound asset ID. Saved to <code>MIKEYWARE_CONFIGS/AK_HUD_CONFIG.json</code>.</span></div>
+      <div class="pm"><span class="pn">Settings panel</span><span class="pt">—</span><span class="pd">Toggle click/hover sounds, set custom hover sound asset ID. Saved to <code>MIKEYWARE_CONFIGS/MW_HUD_CONFIG.json</code>.</span></div>
       <div class="pm"><span class="pn">Command bar</span><span class="pt">—</span><span class="pd">Terminal panel with live autocomplete from <code>_G.MWCmds</code>. Tab to autocomplete, Enter to run.</span></div>
       <div class="pm"><span class="pn">Collapse</span><span class="pt">—</span><span class="pd">Arrow button below/above bar collapses it to hidden. Draggable anywhere on screen.</span></div>
       <div class="rets"><div class="rh">Returns</div><div class="rr"><code>hudGui</code> — the ScreenGui. Destroy it to remove the HUD.</div></div>
