@@ -138,6 +138,38 @@ local function applyGradientToLabel(label, grad)
 end
 UILibrary.Request = (syn and syn.request) or request or http_request
 	or (fluxus and fluxus.request) or function() return {StatusCode=0,Body=""} end
+
+function UILibrary.fetchDiscord(inviteCode)
+	if not inviteCode then return nil end
+	inviteCode = inviteCode:match("discord%.gg/([%w%-]+)") or inviteCode:match("discord%.com/invite/([%w%-]+)") or inviteCode
+	local url = "https://discord.com/api/v10/invites/" .. inviteCode .. "?with_counts=true&with_expiration=true"
+	local ok, result = pcall(function()
+		local res = UILibrary.Request({
+			Url = url,
+			Method = "GET",
+			Headers = {
+				["User-Agent"] = "Mozilla/5.0",
+				["Accept"] = "application/json",
+			},
+		})
+		if not res or res.StatusCode ~= 200 then return nil end
+		return game:GetService("HttpService"):JSONDecode(res.Body)
+	end)
+	if not ok or not result or not result.guild then return nil end
+	local guild   = result.guild
+	local iconUrl = guild.icon and ("https://cdn.discordapp.com/icons/" .. guild.id .. "/" .. guild.icon .. ".png?size=128") or nil
+	return {
+		name        = guild.name or "Unknown",
+		description = guild.description or "",
+		id          = guild.id,
+		icon        = iconUrl,
+		members     = result.approximate_member_count or 0,
+		online      = result.approximate_presence_count or 0,
+		inviteCode  = inviteCode,
+		inviteUrl   = "https://discord.gg/" .. inviteCode,
+		raw         = result,
+	}
+end
 local CONFIG_FOLDER   = "MIKEYWARE_CONFIGS"
 local POSITION_FOLDER = "MIKEYWARE_POSITIONS"
 local function make(className, props)
@@ -846,17 +878,70 @@ function UILibrary.new(title, options)
 			pcall(function()
 				if setclipboard then setclipboard(discordLink) end
 			end)
+			sendNotif("Discord", "Invite link copied to clipboard!", "discord", false)
 		end
 		if configName then
 			self:loadConfig()
 		end
-		sendNotif("Mikeyware Loaded", "Press Right Shift to toggle the menu.", nil, false)
+		sendNotif("Mikeyware", "Loaded! Press RightShift to toggle.", "check-circle", false)
 	end
 	if discordLink then
+		local _discordData   = nil
+		local _discordPara   = nil
+		local _discordFetched = false
+
+		local function buildDiscordPanel()
+			if _discordPara then return end
+			task.spawn(function()
+				local data = UILibrary.fetchDiscord(discordLink)
+				_discordData = data
+				if data then
+					_discordPara = self:addParagraph(data.name, (data.description ~= "" and data.description .. "\n" or "") ..
+						"Members: " .. tostring(data.members) .. "  •  Online: " .. tostring(data.online), {
+						Image    = data.icon,
+						ImageSize = 42,
+						Buttons  = {
+							{
+								Title = "Join Discord",
+								Callback = function()
+									pcall(function() if setclipboard then setclipboard(data.inviteUrl) end end)
+									self:notify("Discord", "Invite link copied!", "discord")
+								end,
+							},
+							{
+								Title = "Refresh",
+								Variant = "Secondary",
+								Callback = function()
+									local fresh = UILibrary.fetchDiscord(discordLink)
+									if fresh and _discordPara then
+										_discordPara.setBody((fresh.description ~= "" and fresh.description .. "\n" or "") ..
+											"Members: " .. tostring(fresh.members) .. "  •  Online: " .. tostring(fresh.online))
+									end
+								end,
+							},
+						},
+					})
+				else
+					self:addParagraph("Discord", "Could not fetch server info.", { Image = "triangle-alert" })
+				end
+			end)
+		end
+
 		self:addTopbarButton("discord", "discord", function()
 			pcall(function() if setclipboard then setclipboard(discordLink) end end)
-			self:notify("Discord", "Link copied to clipboard!")
+			self:notify("Discord", "Invite link copied to clipboard!", "discord")
+			if not _discordFetched then
+				_discordFetched = true
+				buildDiscordPanel()
+			end
 		end)
+
+		self.fetchDiscord = function()
+			return UILibrary.fetchDiscord(discordLink)
+		end
+		self.getDiscordData = function()
+			return _discordData
+		end
 	end
 	if keySysCfg and keySysCfg.validator then
 		local ksGui = make("ScreenGui", {
@@ -913,7 +998,67 @@ function UILibrary.new(title, options)
 			local ok, result = pcall(keySysCfg.validator, ksInput.Text)
 			if ok and result then
 				ksGui:Destroy()
-				revealMain()
+				local lsEnabled = loadingCfg and (loadingCfg.enabled ~= false)
+				if lsEnabled then
+					local lsDuration  = loadingCfg.duration   or 1.2
+					local lsBgColor   = loadingCfg.bgColor    or Color3.fromRGB(8, 8, 10)
+					local lsBarColor  = loadingCfg.barColor   or getThemeVal("accent")
+					local lsTitleColor= loadingCfg.titleColor or Color3.fromRGB(255, 255, 255)
+					local lsSubColor  = loadingCfg.subtitleColor or Color3.fromRGB(140, 140, 140)
+					local lsTitleSize = loadingCfg.titleSize  or 26
+					local lsSubSize   = loadingCfg.subtitleSize or 13
+					local lsLogoId    = loadingCfg.logo
+					local lsGui = make("ScreenGui", {
+						Name="MikeywareLoading", ResetOnSpawn=false,
+						ZIndexBehavior=Enum.ZIndexBehavior.Sibling, DisplayOrder=998, Parent=guiParent,
+					})
+					local lsFrame = make("Frame", {
+						Size=UDim2.new(1,0,1,0), BackgroundColor3=lsBgColor,
+						BackgroundTransparency=0, BorderSizePixel=0, Parent=lsGui,
+					})
+					local yBase = loadingCfg.logo and 0.38 or 0.4
+					if lsLogoId then
+						make("ImageLabel", {
+							Size=UDim2.new(0,64,0,64), Position=UDim2.new(0.5,-32,0,0),
+							AnchorPoint=Vector2.new(0,0),
+							BackgroundTransparency=1,
+							Image=resolveIcon(lsLogoId) or tostring(lsLogoId),
+							Parent=lsFrame,
+						}).Position = UDim2.new(0.5,-32,yBase,-80)
+					end
+					make("TextLabel", {
+						Size=UDim2.new(1,0,0,40), Position=UDim2.new(0,0,yBase,0),
+						BackgroundTransparency=1, Text=loadingCfg.title or (title or "Loading..."),
+						TextColor3=lsTitleColor, TextSize=lsTitleSize, Font=Enum.Font.GothamBold,
+						TextXAlignment=Enum.TextXAlignment.Center, Parent=lsFrame,
+					})
+					make("TextLabel", {
+						Size=UDim2.new(1,0,0,22), Position=UDim2.new(0,0,yBase,46),
+						BackgroundTransparency=1, Text=loadingCfg.subtitle or "Please wait...",
+						TextColor3=lsSubColor, TextSize=lsSubSize, Font=Enum.Font.Gotham,
+						TextXAlignment=Enum.TextXAlignment.Center, Parent=lsFrame,
+					})
+					local lsTrack = make("Frame", {
+						Size=UDim2.new(0,220,0,4), Position=UDim2.new(0.5,-110,yBase,80),
+						BackgroundColor3=Color3.fromRGB(35,35,35), BorderSizePixel=0, Parent=lsFrame,
+					})
+					addCorner(lsTrack, 2)
+					local lsFill = make("Frame", {
+						Size=UDim2.new(0,0,1,0), BackgroundColor3=lsBarColor,
+						BorderSizePixel=0, Parent=lsTrack,
+					})
+					addCorner(lsFill, 2)
+					task.spawn(function()
+						tween(lsFill, {Size=UDim2.new(1,0,1,0)}, lsDuration, Enum.EasingStyle.Quint)
+						task.wait(lsDuration + 0.1)
+						revealMain()
+						tween(lsFrame, {BackgroundTransparency=1}, 0.4)
+						task.wait(0.45)
+						lsGui:Destroy()
+					end)
+				else
+					revealMain()
+				end
 			else
 				ksStatus.Text = "Invalid key. Try again."
 				tween(ksInput, {BackgroundColor3=Color3.fromRGB(40,10,10)}, 0.1)
@@ -926,39 +1071,58 @@ function UILibrary.new(title, options)
 	end
 	local lsEnabled = loadingCfg and (loadingCfg.enabled ~= false)
 	if lsEnabled then
+		local lsDuration   = loadingCfg.duration      or 1.2
+		local lsBgColor    = loadingCfg.bgColor        or Color3.fromRGB(8, 8, 10)
+		local lsBarColor   = loadingCfg.barColor       or getThemeVal("accent")
+		local lsTitleColor = loadingCfg.titleColor     or Color3.fromRGB(255, 255, 255)
+		local lsSubColor   = loadingCfg.subtitleColor  or Color3.fromRGB(140, 140, 140)
+		local lsTitleSize  = loadingCfg.titleSize      or 26
+		local lsSubSize    = loadingCfg.subtitleSize   or 13
+		local lsLogoId     = loadingCfg.logo
 		local lsGui = make("ScreenGui", {
 			Name="MikeywareLoading", ResetOnSpawn=false,
 			ZIndexBehavior=Enum.ZIndexBehavior.Sibling, DisplayOrder=998, Parent=guiParent,
 		})
 		local lsFrame = make("Frame", {
-			Size=UDim2.new(1,0,1,0), BackgroundColor3=Color3.fromRGB(8,8,10),
+			Size=UDim2.new(1,0,1,0), BackgroundColor3=lsBgColor,
 			BackgroundTransparency=0, BorderSizePixel=0, Parent=lsGui,
 		})
+		local yBase = lsLogoId and 0.38 or 0.4
+		if lsLogoId then
+			local logoImg = make("ImageLabel", {
+				Size=UDim2.new(0,64,0,64),
+				AnchorPoint=Vector2.new(0.5,0),
+				BackgroundTransparency=1,
+				Image=resolveIcon(lsLogoId) or tostring(lsLogoId),
+				Parent=lsFrame,
+			})
+			logoImg.Position = UDim2.new(0.5,0,yBase,-80)
+		end
 		make("TextLabel", {
-			Size=UDim2.new(1,0,0,40), Position=UDim2.new(0,0,0.4,0),
+			Size=UDim2.new(1,0,0,40), Position=UDim2.new(0,0,yBase,0),
 			BackgroundTransparency=1, Text=loadingCfg.title or (title or "Loading..."),
-			TextColor3=Color3.fromRGB(255,255,255), TextSize=26, Font=Enum.Font.GothamBold,
+			TextColor3=lsTitleColor, TextSize=lsTitleSize, Font=Enum.Font.GothamBold,
 			TextXAlignment=Enum.TextXAlignment.Center, Parent=lsFrame,
 		})
 		make("TextLabel", {
-			Size=UDim2.new(1,0,0,22), Position=UDim2.new(0,0,0.4,46),
+			Size=UDim2.new(1,0,0,22), Position=UDim2.new(0,0,yBase,46),
 			BackgroundTransparency=1, Text=loadingCfg.subtitle or "Please wait...",
-			TextColor3=Color3.fromRGB(140,140,140), TextSize=13, Font=Enum.Font.Gotham,
+			TextColor3=lsSubColor, TextSize=lsSubSize, Font=Enum.Font.Gotham,
 			TextXAlignment=Enum.TextXAlignment.Center, Parent=lsFrame,
 		})
 		local lsTrack = make("Frame", {
-			Size=UDim2.new(0,220,0,4), Position=UDim2.new(0.5,-110,0.4,80),
+			Size=UDim2.new(0,220,0,4), Position=UDim2.new(0.5,-110,yBase,80),
 			BackgroundColor3=Color3.fromRGB(35,35,35), BorderSizePixel=0, Parent=lsFrame,
 		})
 		addCorner(lsTrack, 2)
 		local lsFill = make("Frame", {
-			Size=UDim2.new(0,0,1,0), BackgroundColor3=getThemeVal("accent"),
+			Size=UDim2.new(0,0,1,0), BackgroundColor3=lsBarColor,
 			BorderSizePixel=0, Parent=lsTrack,
 		})
 		addCorner(lsFill, 2)
 		task.spawn(function()
-			tween(lsFill, {Size=UDim2.new(1,0,1,0)}, 1.2, Enum.EasingStyle.Quint)
-			task.wait(1.3)
+			tween(lsFill, {Size=UDim2.new(1,0,1,0)}, lsDuration, Enum.EasingStyle.Quint)
+			task.wait(lsDuration + 0.1)
 			revealMain()
 			tween(lsFrame, {BackgroundTransparency=1}, 0.4)
 			task.wait(0.45)
@@ -1018,6 +1182,7 @@ function UILibrary:_updateTabScroll()
 	self.tabScrollFrame.CanvasSize = UDim2.new(0, contentW, 0, 0)
 end
 function UILibrary:_updateScroll()
+	if not self.scrollFrame or not self.scrollFrame:IsA("ScrollingFrame") then return end
 	local tabOffset   = self.tabScrollFrame.Visible and 34 or 0
 	local contentSize = self._activeTab
 		and self._activeTab.listLayout.AbsoluteContentSize.Y + 8
@@ -1033,6 +1198,7 @@ function UILibrary:_updateScroll()
 end
 function UILibrary:resize()
 	if self._minimized then return end
+	if not self.scrollFrame or not self.scrollFrame:IsA("ScrollingFrame") then return end
 	self:_updateScroll()
 	if self._userResized then return end
 	local tabOffset   = self.tabScrollFrame.Visible and 34 or 0
