@@ -140,35 +140,72 @@ UILibrary.Request = (syn and syn.request) or request or http_request
 	or (fluxus and fluxus.request) or function() return {StatusCode=0,Body=""} end
 
 function UILibrary.fetchDiscord(inviteCode)
-	if not inviteCode then return nil end
-	inviteCode = inviteCode:match("discord%.gg/([%w%-]+)") or inviteCode:match("discord%.com/invite/([%w%-]+)") or inviteCode
-	local url = "https://discord.com/api/v10/invites/" .. inviteCode .. "?with_counts=true&with_expiration=true"
-	local ok, result = pcall(function()
-		local res = UILibrary.Request({
+	if not inviteCode then return nil, "no invite code" end
+	inviteCode = tostring(inviteCode)
+	inviteCode = inviteCode:match("discord%.gg/([%w%-]+)")
+		or inviteCode:match("discord%.com/invite/([%w%-]+)")
+		or inviteCode:match("([%w%-]+)$")
+	if not inviteCode or inviteCode == "" then return nil, "could not parse invite code" end
+	local function attempt(url, attemptIdx)
+		local ok, res = pcall(UILibrary.Request, {
 			Url = url,
 			Method = "GET",
 			Headers = {
-				["User-Agent"] = "Mozilla/5.0",
-				["Accept"] = "application/json",
+				["User-Agent"]      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+				["Accept"]          = "application/json, text/plain, */*",
+				["Accept-Language"] = "en-US,en;q=0.9",
+				["Accept-Encoding"] = "gzip, deflate, br",
+				["Connection"]      = "keep-alive",
 			},
 		})
-		if not res or res.StatusCode ~= 200 then return nil end
-		return game:GetService("HttpService"):JSONDecode(res.Body)
-	end)
-	if not ok or not result or not result.guild then return nil end
-	local guild   = result.guild
-	local iconUrl = guild.icon and ("https://cdn.discordapp.com/icons/" .. guild.id .. "/" .. guild.icon .. ".png?size=128") or nil
-	return {
-		name        = guild.name or "Unknown",
-		description = guild.description or "",
-		id          = guild.id,
-		icon        = iconUrl,
-		members     = result.approximate_member_count or 0,
-		online      = result.approximate_presence_count or 0,
-		inviteCode  = inviteCode,
-		inviteUrl   = "https://discord.gg/" .. inviteCode,
-		raw         = result,
+		if not ok then return nil, "request threw: " .. tostring(res) end
+		if not res then return nil, "request returned nil" end
+		local status = res.StatusCode or res.Status or res.statusCode or res.status or 0
+		local body   = res.Body or res.body or ""
+		if type(body) ~= "string" then body = tostring(body) end
+		if status == 0 and body == "" then
+			return nil, "empty response (likely TLS / DNS / executor blocked)"
+		end
+		if status >= 400 then
+			local snippet = body:sub(1, 200)
+			return nil, "HTTP " .. status .. ": " .. snippet
+		end
+		if body == "" then return nil, "empty body, status " .. status end
+		local jsonOk, decoded = pcall(game:GetService("HttpService").JSONDecode, game:GetService("HttpService"), body)
+		if not jsonOk or not decoded then return nil, "JSON decode failed: " .. tostring(decoded) end
+		if decoded and decoded.message and not decoded.guild then
+			return nil, "Discord API: " .. tostring(decoded.message)
+		end
+		return decoded
+	end
+	local urls = {
+		"https://discord.com/api/v10/invites/" .. inviteCode .. "?with_counts=true&with_expiration=true",
+		"https://discordapp.com/api/v10/invites/" .. inviteCode .. "?with_counts=true&with_expiration=true",
 	}
+	local lastErr
+	for i, url in ipairs(urls) do
+		local data, err = attempt(url, i)
+		if data then
+			if not data.guild and not data.approximate_member_count then
+				return nil, "Discord returned no guild data (invite may be expired)"
+			end
+			local guild   = data.guild or {}
+			local iconUrl = guild.icon and ("https://cdn.discordapp.com/icons/" .. (guild.id or "") .. "/" .. guild.icon .. ".png?size=128") or nil
+			return {
+				name        = guild.name or data.guild_id or "Unknown",
+				description = (guild.description and guild.description ~= "" and guild.description) or "",
+				id          = guild.id or "",
+				icon        = iconUrl,
+				members     = data.approximate_member_count or 0,
+				online      = data.approximate_presence_count or 0,
+				inviteCode  = inviteCode,
+				inviteUrl   = "https://discord.gg/" .. inviteCode,
+				raw         = data,
+			}
+		end
+		lastErr = err
+	end
+	return nil, lastErr or "unknown failure"
 end
 local CONFIG_FOLDER   = "MIKEYWARE_CONFIGS"
 local POSITION_FOLDER = "MIKEYWARE_POSITIONS"
@@ -517,6 +554,65 @@ function UILibrary.new(title, options)
 	local loadingCfg  = options.loadingScreen
 	local keySysCfg   = options.keySystem
 	if options.theme then UILibrary:setTheme(options.theme) end
+	local function buildLoadingScreen(cfg, onDone)
+		local lsDuration  = cfg.duration   or 1.2
+		local lsBgColor   = cfg.bgColor    or getThemeVal("background")
+		local lsBarColor  = cfg.barColor   or getThemeVal("accent")
+		local lsTitleColor= cfg.titleColor or getThemeVal("text")
+		local lsSubColor  = cfg.subtitleColor or getThemeVal("textDim")
+		local lsTitleSize = cfg.titleSize  or 26
+		local lsSubSize   = cfg.subtitleSize or 13
+		local lsLogoId    = cfg.logo
+		local lsGui = make("ScreenGui", {
+			Name="MikeywareLoading", ResetOnSpawn=false,
+			ZIndexBehavior=Enum.ZIndexBehavior.Sibling, DisplayOrder=998, Parent=guiParent,
+		})
+		local lsFrame = make("Frame", {
+			Size=UDim2.new(1,0,1,0), BackgroundColor3=lsBgColor,
+			BackgroundTransparency=0, BorderSizePixel=0, Parent=lsGui,
+		})
+		local yBase = lsLogoId and 0.38 or 0.4
+		if lsLogoId then
+			local logoImg = make("ImageLabel", {
+				Size=UDim2.new(0,64,0,64), AnchorPoint=Vector2.new(0.5,0),
+				BackgroundTransparency=1,
+				Image=resolveIcon(lsLogoId) or tostring(lsLogoId),
+				Parent=lsFrame,
+			})
+			logoImg.Position = UDim2.new(0.5,0,yBase,-80)
+		end
+		make("TextLabel", {
+			Size=UDim2.new(1,0,0,40), Position=UDim2.new(0,0,yBase,0),
+			BackgroundTransparency=1, Text=cfg.title or (title or "Loading..."),
+			TextColor3=lsTitleColor, TextSize=lsTitleSize, Font=Enum.Font.GothamBold,
+			TextXAlignment=Enum.TextXAlignment.Center, Parent=lsFrame,
+		})
+		make("TextLabel", {
+			Size=UDim2.new(1,0,0,22), Position=UDim2.new(0,0,yBase,46),
+			BackgroundTransparency=1, Text=cfg.subtitle or "Please wait...",
+			TextColor3=lsSubColor, TextSize=lsSubSize, Font=Enum.Font.Gotham,
+			TextXAlignment=Enum.TextXAlignment.Center, Parent=lsFrame,
+		})
+		local lsTrack = make("Frame", {
+			Size=UDim2.new(0,220,0,4), Position=UDim2.new(0.5,-110,yBase,80),
+			BackgroundColor3=Color3.fromRGB(35,35,35), BorderSizePixel=0, Parent=lsFrame,
+		})
+		addCorner(lsTrack, 2)
+		local lsFill = make("Frame", {
+			Size=UDim2.new(0,0,1,0), BackgroundColor3=lsBarColor,
+			BorderSizePixel=0, Parent=lsTrack,
+		})
+		addCorner(lsFill, 2)
+		task.spawn(function()
+			tween(lsFill, {Size=UDim2.new(1,0,1,0)}, lsDuration, Enum.EasingStyle.Quint)
+			task.wait(lsDuration + 0.1)
+			if onDone then onDone() end
+			tween(lsFrame, {BackgroundTransparency=1}, 0.4)
+			task.wait(0.45)
+			lsGui:Destroy()
+		end)
+		return lsGui
+	end
 	local self       = setmetatable({}, UILibrary)
 	self._conns      = {}
 	self._closed     = false
@@ -893,7 +989,7 @@ function UILibrary.new(title, options)
 		local function buildDiscordPanel()
 			if _discordPara then return end
 			task.spawn(function()
-				local data = UILibrary.fetchDiscord(discordLink)
+				local data, err = UILibrary.fetchDiscord(discordLink)
 				_discordData = data
 				if data then
 					_discordPara = self:addParagraph(data.name, (data.description ~= "" and data.description .. "\n" or "") ..
@@ -912,17 +1008,20 @@ function UILibrary.new(title, options)
 								Title = "Refresh",
 								Variant = "Secondary",
 								Callback = function()
-									local fresh = UILibrary.fetchDiscord(discordLink)
+									local fresh, ferr = UILibrary.fetchDiscord(discordLink)
 									if fresh and _discordPara then
+										_discordData = fresh
 										_discordPara.setBody((fresh.description ~= "" and fresh.description .. "\n" or "") ..
 											"Members: " .. tostring(fresh.members) .. "  •  Online: " .. tostring(fresh.online))
+									elseif _discordPara then
+										_discordPara.setBody("Refresh failed: " .. tostring(ferr or "unknown error"))
 									end
 								end,
 							},
 						},
 					})
 				else
-					self:addParagraph("Discord", "Could not fetch server info.", { Image = "triangle-alert" })
+					self:addParagraph("Discord", "Could not fetch server info.\n" .. tostring(err or "unknown error"), { Image = "triangle-alert" })
 				end
 			end)
 		end
@@ -944,6 +1043,14 @@ function UILibrary.new(title, options)
 		end
 	end
 	if keySysCfg and keySysCfg.validator then
+		local ksBg     = getThemeVal("background")
+		local ksSurface= getThemeVal("surface")
+		local ksBorder = getThemeVal("border")
+		local ksAccent = getThemeVal("accent")
+		local ksText   = getThemeVal("text")
+		local ksTextDim= getThemeVal("textDim")
+		local ksTextMuted = getThemeVal("textMuted")
+		local ksRed    = Color3.fromRGB(220, 70, 70)
 		local ksGui = make("ScreenGui", {
 			Name = "MikeywareKeySystem", ResetOnSpawn = false,
 			ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
@@ -954,180 +1061,104 @@ function UILibrary.new(title, options)
 			BackgroundTransparency = 0.45, BorderSizePixel = 0, Parent = ksGui,
 		})
 		local ksBox = make("Frame", {
-			Size = UDim2.new(0,320,0,180), Position = UDim2.new(0.5,-160,0.5,-90),
-			BackgroundColor3 = Color3.fromRGB(12,12,14), BackgroundTransparency = 0.05,
+			Size = UDim2.new(0,320,0,200), Position = UDim2.new(0.5,-160,0.5,-100),
+			BackgroundColor3 = ksSurface, BackgroundTransparency = 0,
 			BorderSizePixel = 0, Parent = ksOverlay,
 		})
 		addCorner(ksBox, 12)
-		make("UIStroke", {Color=Color3.fromRGB(60,60,60), Thickness=1, Parent=ksBox})
-		make("TextLabel", {
-			Size=UDim2.new(1,-20,0,24), Position=UDim2.new(0,10,0,12),
+		make("UIStroke", {Color = ksBorder, Thickness = 1, Parent = ksBox})
+		local ksTitleLabel = make("TextLabel", {
+			Size=UDim2.new(1,-44,0,24), Position=UDim2.new(0,12,0,14),
 			BackgroundTransparency=1, Text=keySysCfg.title or "Key Required",
-			TextColor3=Color3.fromRGB(255,255,255), TextSize=15, Font=Enum.Font.GothamBold,
+			TextColor3=ksText, TextSize=15, Font=Enum.Font.GothamBold,
 			TextXAlignment=Enum.TextXAlignment.Center, Parent=ksBox,
 		})
 		make("TextLabel", {
-			Size=UDim2.new(1,-20,0,16), Position=UDim2.new(0,10,0,38),
+			Size=UDim2.new(1,-44,0,16), Position=UDim2.new(0,12,0,40),
 			BackgroundTransparency=1, Text=keySysCfg.subtitle or "Enter the key to continue",
-			TextColor3=Color3.fromRGB(140,140,140), TextSize=11, Font=Enum.Font.Gotham,
+			TextColor3=ksTextDim, TextSize=11, Font=Enum.Font.Gotham,
 			TextXAlignment=Enum.TextXAlignment.Center, Parent=ksBox,
+		})
+		local ksClose = make("TextButton", {
+			Size=UDim2.new(0,24,0,24), Position=UDim2.new(1,-30,0,8),
+			BackgroundTransparency=1, Text="×",
+			TextColor3=ksTextMuted, TextSize=18, Font=Enum.Font.GothamBold,
+			BorderSizePixel=0, Parent=ksBox,
 		})
 		local ksInput = make("TextBox", {
-			Size=UDim2.new(1,-24,0,32), Position=UDim2.new(0,12,0,70),
-			BackgroundColor3=Color3.fromRGB(20,20,20), BackgroundTransparency=0.2,
+			Size=UDim2.new(1,-24,0,32), Position=UDim2.new(0,12,0,72),
+			BackgroundColor3=ksBg, BackgroundTransparency=0,
 			Text="", PlaceholderText="Enter key...",
-			TextColor3=Color3.fromRGB(255,255,255), PlaceholderColor3=Color3.fromRGB(100,100,100),
+			TextColor3=ksText, PlaceholderColor3=ksTextMuted,
 			TextSize=12, Font=Enum.Font.Gotham, BorderSizePixel=0,
 			ClearTextOnFocus=false, Parent=ksBox,
 		})
 		addCorner(ksInput, 6)
+		make("UIStroke", {Color = ksBorder, Thickness = 1, Parent = ksInput})
 		local ksStatus = make("TextLabel", {
-			Size=UDim2.new(1,-20,0,16), Position=UDim2.new(0,10,0,110),
+			Size=UDim2.new(1,-20,0,16), Position=UDim2.new(0,10,0,112),
 			BackgroundTransparency=1, Text="",
-			TextColor3=Color3.fromRGB(255,80,80), TextSize=10, Font=Enum.Font.Gotham,
+			TextColor3=ksRed, TextSize=10, Font=Enum.Font.Gotham,
 			TextXAlignment=Enum.TextXAlignment.Center, Parent=ksBox,
 		})
 		local ksConfirm = make("TextButton", {
-			Size=UDim2.new(1,-24,0,30), Position=UDim2.new(0,12,0,136),
-			BackgroundColor3=Color3.fromRGB(40,100,40), BackgroundTransparency=0.15,
+			Size=UDim2.new(1,-24,0,32), Position=UDim2.new(0,12,0,140),
+			BackgroundColor3=ksAccent, BackgroundTransparency=0.15,
 			Text="Confirm", TextColor3=Color3.fromRGB(255,255,255),
 			TextSize=12, Font=Enum.Font.GothamBold, BorderSizePixel=0, Parent=ksBox,
 		})
 		addCorner(ksConfirm, 7)
-		local function tryKey()
-			local ok, result = pcall(keySysCfg.validator, ksInput.Text)
-			if ok and result then
-				ksGui:Destroy()
-				local lsEnabled = loadingCfg and (loadingCfg.enabled ~= false)
-				if lsEnabled then
-					local lsDuration  = loadingCfg.duration   or 1.2
-					local lsBgColor   = loadingCfg.bgColor    or Color3.fromRGB(8, 8, 10)
-					local lsBarColor  = loadingCfg.barColor   or getThemeVal("accent")
-					local lsTitleColor= loadingCfg.titleColor or Color3.fromRGB(255, 255, 255)
-					local lsSubColor  = loadingCfg.subtitleColor or Color3.fromRGB(140, 140, 140)
-					local lsTitleSize = loadingCfg.titleSize  or 26
-					local lsSubSize   = loadingCfg.subtitleSize or 13
-					local lsLogoId    = loadingCfg.logo
-					local lsGui = make("ScreenGui", {
-						Name="MikeywareLoading", ResetOnSpawn=false,
-						ZIndexBehavior=Enum.ZIndexBehavior.Sibling, DisplayOrder=998, Parent=guiParent,
-					})
-					local lsFrame = make("Frame", {
-						Size=UDim2.new(1,0,1,0), BackgroundColor3=lsBgColor,
-						BackgroundTransparency=0, BorderSizePixel=0, Parent=lsGui,
-					})
-					local yBase = loadingCfg.logo and 0.38 or 0.4
-					if lsLogoId then
-						make("ImageLabel", {
-							Size=UDim2.new(0,64,0,64), Position=UDim2.new(0.5,-32,0,0),
-							AnchorPoint=Vector2.new(0,0),
-							BackgroundTransparency=1,
-							Image=resolveIcon(lsLogoId) or tostring(lsLogoId),
-							Parent=lsFrame,
-						}).Position = UDim2.new(0.5,-32,yBase,-80)
-					end
-					make("TextLabel", {
-						Size=UDim2.new(1,0,0,40), Position=UDim2.new(0,0,yBase,0),
-						BackgroundTransparency=1, Text=loadingCfg.title or (title or "Loading..."),
-						TextColor3=lsTitleColor, TextSize=lsTitleSize, Font=Enum.Font.GothamBold,
-						TextXAlignment=Enum.TextXAlignment.Center, Parent=lsFrame,
-					})
-					make("TextLabel", {
-						Size=UDim2.new(1,0,0,22), Position=UDim2.new(0,0,yBase,46),
-						BackgroundTransparency=1, Text=loadingCfg.subtitle or "Please wait...",
-						TextColor3=lsSubColor, TextSize=lsSubSize, Font=Enum.Font.Gotham,
-						TextXAlignment=Enum.TextXAlignment.Center, Parent=lsFrame,
-					})
-					local lsTrack = make("Frame", {
-						Size=UDim2.new(0,220,0,4), Position=UDim2.new(0.5,-110,yBase,80),
-						BackgroundColor3=Color3.fromRGB(35,35,35), BorderSizePixel=0, Parent=lsFrame,
-					})
-					addCorner(lsTrack, 2)
-					local lsFill = make("Frame", {
-						Size=UDim2.new(0,0,1,0), BackgroundColor3=lsBarColor,
-						BorderSizePixel=0, Parent=lsTrack,
-					})
-					addCorner(lsFill, 2)
-					task.spawn(function()
-						tween(lsFill, {Size=UDim2.new(1,0,1,0)}, lsDuration, Enum.EasingStyle.Quint)
-						task.wait(lsDuration + 0.1)
-						revealMain()
-						tween(lsFrame, {BackgroundTransparency=1}, 0.4)
-						task.wait(0.45)
-						lsGui:Destroy()
-					end)
-				else
-					revealMain()
-				end
+		local keyConns = {}
+		local function addKeyConn(signal, fn)
+			local c = signal:Connect(fn)
+			table.insert(keyConns, c)
+			return c
+		end
+		local dismissed = false
+		local function proceedAfterKey()
+			if dismissed then return end
+			dismissed = true
+			ksGui:Destroy()
+			local lsEnabled = loadingCfg and (loadingCfg.enabled ~= false)
+			if lsEnabled then
+				buildLoadingScreen(loadingCfg, function() revealMain() end)
 			else
-				ksStatus.Text = "Invalid key. Try again."
-				tween(ksInput, {BackgroundColor3=Color3.fromRGB(40,10,10)}, 0.1)
-				task.delay(0.4, function() tween(ksInput, {BackgroundColor3=Color3.fromRGB(20,20,20)}, 0.2) end)
+				revealMain()
 			end
 		end
-		conn(ksConfirm.MouseButton1Click, tryKey)
-		conn(ksInput.FocusLost, function(enter) if enter then tryKey() end end)
+		local function tryKey()
+			if dismissed then return end
+			local ok, result = pcall(keySysCfg.validator, ksInput.Text)
+			if ok and result then
+				proceedAfterKey()
+			else
+				ksStatus.Text = "Invalid key. Try again."
+				tween(ksInput, {BackgroundColor3 = Color3.fromRGB(60,18,18)}, 0.1)
+				task.delay(0.4, function() tween(ksInput, {BackgroundColor3 = ksBg}, 0.2) end)
+			end
+		end
+		addKeyConn(ksConfirm.MouseButton1Click, tryKey)
+		addKeyConn(ksInput.FocusLost, function(enter) if enter then tryKey() end end)
+		addKeyConn(ksClose.MouseEnter, function()
+			tween(ksClose, {TextColor3 = ksText}, 0.12)
+		end)
+		addKeyConn(ksClose.MouseLeave, function()
+			tween(ksClose, {TextColor3 = ksTextMuted}, 0.12)
+		end)
+		addKeyConn(ksClose.MouseButton1Click, function()
+			if dismissed then return end
+			dismissed = true
+			for _, c in ipairs(keyConns) do
+				if c and c.Connected then pcall(function() c:Disconnect() end) end
+			end
+			keyConns = {}
+			ksGui:Destroy()
+		end)
 		return self
 	end
 	local lsEnabled = loadingCfg and (loadingCfg.enabled ~= false)
 	if lsEnabled then
-		local lsDuration   = loadingCfg.duration      or 1.2
-		local lsBgColor    = loadingCfg.bgColor        or Color3.fromRGB(8, 8, 10)
-		local lsBarColor   = loadingCfg.barColor       or getThemeVal("accent")
-		local lsTitleColor = loadingCfg.titleColor     or Color3.fromRGB(255, 255, 255)
-		local lsSubColor   = loadingCfg.subtitleColor  or Color3.fromRGB(140, 140, 140)
-		local lsTitleSize  = loadingCfg.titleSize      or 26
-		local lsSubSize    = loadingCfg.subtitleSize   or 13
-		local lsLogoId     = loadingCfg.logo
-		local lsGui = make("ScreenGui", {
-			Name="MikeywareLoading", ResetOnSpawn=false,
-			ZIndexBehavior=Enum.ZIndexBehavior.Sibling, DisplayOrder=998, Parent=guiParent,
-		})
-		local lsFrame = make("Frame", {
-			Size=UDim2.new(1,0,1,0), BackgroundColor3=lsBgColor,
-			BackgroundTransparency=0, BorderSizePixel=0, Parent=lsGui,
-		})
-		local yBase = lsLogoId and 0.38 or 0.4
-		if lsLogoId then
-			local logoImg = make("ImageLabel", {
-				Size=UDim2.new(0,64,0,64),
-				AnchorPoint=Vector2.new(0.5,0),
-				BackgroundTransparency=1,
-				Image=resolveIcon(lsLogoId) or tostring(lsLogoId),
-				Parent=lsFrame,
-			})
-			logoImg.Position = UDim2.new(0.5,0,yBase,-80)
-		end
-		make("TextLabel", {
-			Size=UDim2.new(1,0,0,40), Position=UDim2.new(0,0,yBase,0),
-			BackgroundTransparency=1, Text=loadingCfg.title or (title or "Loading..."),
-			TextColor3=lsTitleColor, TextSize=lsTitleSize, Font=Enum.Font.GothamBold,
-			TextXAlignment=Enum.TextXAlignment.Center, Parent=lsFrame,
-		})
-		make("TextLabel", {
-			Size=UDim2.new(1,0,0,22), Position=UDim2.new(0,0,yBase,46),
-			BackgroundTransparency=1, Text=loadingCfg.subtitle or "Please wait...",
-			TextColor3=lsSubColor, TextSize=lsSubSize, Font=Enum.Font.Gotham,
-			TextXAlignment=Enum.TextXAlignment.Center, Parent=lsFrame,
-		})
-		local lsTrack = make("Frame", {
-			Size=UDim2.new(0,220,0,4), Position=UDim2.new(0.5,-110,yBase,80),
-			BackgroundColor3=Color3.fromRGB(35,35,35), BorderSizePixel=0, Parent=lsFrame,
-		})
-		addCorner(lsTrack, 2)
-		local lsFill = make("Frame", {
-			Size=UDim2.new(0,0,1,0), BackgroundColor3=lsBarColor,
-			BorderSizePixel=0, Parent=lsTrack,
-		})
-		addCorner(lsFill, 2)
-		task.spawn(function()
-			tween(lsFill, {Size=UDim2.new(1,0,1,0)}, lsDuration, Enum.EasingStyle.Quint)
-			task.wait(lsDuration + 0.1)
-			revealMain()
-			tween(lsFrame, {BackgroundTransparency=1}, 0.4)
-			task.wait(0.45)
-			lsGui:Destroy()
-		end)
+		buildLoadingScreen(loadingCfg, function() revealMain() end)
 		return self
 	end
 	revealMain()
@@ -3844,7 +3875,7 @@ function UILibrary.addHUD(options)
 		ZIndex           = 0,
 		Parent           = hudGui,
 	})
-	game:GetService("RunService").RenderStepped:Connect(function()
+	local barShadowConn = game:GetService("RunService").RenderStepped:Connect(function()
 		if not bar.Parent then return end
 		local ap = bar.AbsolutePosition
 		local as = bar.AbsoluteSize
@@ -3890,15 +3921,21 @@ function UILibrary.addHUD(options)
 		spacer(dividerOrder * 10 + 6)
 		return d
 	end
+	local hudConns = {}
+	local function hudConn(signal, fn)
+		local c = signal:Connect(fn)
+		table.insert(hudConns, c)
+		return c
+	end
 	local dragActive, dragOrigin, dragStart = false, nil, nil
-	bar.InputBegan:Connect(function(inp)
+	hudConn(bar.InputBegan, function(inp)
 		if inp.UserInputType == Enum.UserInputType.MouseButton1 then
 			dragActive = true
 			dragOrigin = inp.Position
 			dragStart  = bar.Position
 		end
 	end)
-	ui.InputChanged:Connect(function(inp)
+	hudConn(ui.InputChanged, function(inp)
 		if dragActive and inp.UserInputType == Enum.UserInputType.MouseMovement then
 			local d = inp.Position - dragOrigin
 			bar.Position = UDim2.new(
@@ -3907,7 +3944,7 @@ function UILibrary.addHUD(options)
 			)
 		end
 	end)
-	ui.InputEnded:Connect(function(inp)
+	hudConn(ui.InputEnded, function(inp)
 		if inp.UserInputType == Enum.UserInputType.MouseButton1 then
 			dragActive = false
 		end
@@ -4809,9 +4846,35 @@ function UILibrary.addHUD(options)
 		if not hudGui.Parent then
 			pcall(function() fpsCon:Disconnect() end)
 			pcall(function() pingCon:Disconnect() end)
+			pcall(function() barShadowConn:Disconnect() end)
+			for _, c in ipairs(hudConns) do
+				if c and c.Connected then pcall(function() c:Disconnect() end) end
+			end
 		end
 	end)
 	return hudGui
+end
+local STACK_PROXY_DENYLIST = {
+	addHUD = true, fetchDiscord = true, addTheme = true, setTheme = true,
+	new = true, addConnection = true,
+}
+local function makeStackProxy(self, col)
+	return setmetatable({}, {
+		__index = function(_, k)
+			if STACK_PROXY_DENYLIST[k] then return nil end
+			if type(UILibrary[k]) ~= "function" then return nil end
+			return function(_, ...)
+				local savedTab    = self._activeTab
+				local savedScroll = self.scrollFrame
+				self.scrollFrame = col
+				self._activeTab  = nil
+				local result = UILibrary[k](self, ...)
+				self.scrollFrame = savedScroll
+				self._activeTab  = savedTab
+				return result
+			end
+		end
+	})
 end
 function UILibrary:addHStack()
 	local parent, _, layoutOrder = self:_getTarget()
@@ -4825,36 +4888,22 @@ function UILibrary:addHStack()
 		Padding = UDim.new(0,6), SortOrder = Enum.SortOrder.LayoutOrder, Parent = wrapper,
 	})
 	if self._activeTab then table.insert(self._activeTab.items, wrapper) end
-	local function makeColumn()
-		local col = make("Frame", {
-			Size = UDim2.new(0.5,-3,0,0), AutomaticSize = Enum.AutomaticSize.Y,
-			BackgroundTransparency = 1, Parent = wrapper,
-		})
-		make("UIListLayout", {
-			Padding = UDim.new(0,6), SortOrder = Enum.SortOrder.LayoutOrder, Parent = col,
-		})
-		local proxy = setmetatable({}, {
-			__index = function(_, k)
-				if type(UILibrary[k]) == "function" then
-					return function(_, ...)
-						local savedTab  = self._activeTab
-						local savedScroll = self.scrollFrame
-						self.scrollFrame = col
-						self._activeTab  = nil
-						local result = UILibrary[k](self, ...)
-						self.scrollFrame = savedScroll
-						self._activeTab  = savedTab
-						return result
-					end
-				end
-			end
-		})
-		return proxy
-	end
-	local left  = makeColumn()
-	local right = makeColumn()
+	local left  = make("Frame", {
+		Size = UDim2.new(0.5,-3,0,0), AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1, Parent = wrapper,
+	})
+	make("UIListLayout", { Padding=UDim.new(0,6), SortOrder=Enum.SortOrder.LayoutOrder, Parent=left })
+	local right = make("Frame", {
+		Size = UDim2.new(0.5,-3,0,0), AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1, Parent = wrapper,
+	})
+	make("UIListLayout", { Padding=UDim.new(0,6), SortOrder=Enum.SortOrder.LayoutOrder, Parent=right })
 	if not self._minimized then self:resize() end
-	return { left = left, right = right, frame = wrapper }
+	return {
+		left  = makeStackProxy(self, left),
+		right = makeStackProxy(self, right),
+		frame = wrapper,
+	}
 end
 function UILibrary:addVStack()
 	local parent, _, layoutOrder = self:_getTarget()
@@ -4864,24 +4913,8 @@ function UILibrary:addVStack()
 	})
 	make("UIListLayout", { Padding=UDim.new(0,6), SortOrder=Enum.SortOrder.LayoutOrder, Parent=col })
 	if self._activeTab then table.insert(self._activeTab.items, col) end
-	local proxy = setmetatable({}, {
-		__index = function(_, k)
-			if type(UILibrary[k]) == "function" then
-				return function(_, ...)
-					local savedTab = self._activeTab
-					local savedScroll = self.scrollFrame
-					self.scrollFrame = col
-					self._activeTab  = nil
-					local result = UILibrary[k](self, ...)
-					self.scrollFrame = savedScroll
-					self._activeTab  = savedTab
-					return result
-				end
-			end
-		end
-	})
 	if not self._minimized then self:resize() end
-	return proxy
+	return makeStackProxy(self, col)
 end
 function UILibrary:addViewport(instance, options)
 	options = options or {}
